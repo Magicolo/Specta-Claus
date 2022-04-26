@@ -1,0 +1,17 @@
+bin/
+obj/
+.vs/
+*.user
+.vscode/solution-explorer
+
+// Unity
+Logs/
+Library/
+Temp/
+Build/
+Builds/
+*.sln
+*.csproj
+
+.fake
+.ionide
