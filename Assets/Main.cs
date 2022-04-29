@@ -73,12 +73,15 @@ public class Main : MonoBehaviour
         public int Beats = 16;
         public int Voices = 16;
         public float Threshold = 0.1f;
+        public float Duration = 0.1f;
+        public float Fade = 0.1f;
         public Vector2Int Octaves = new(4, 8);
         [Range(0f, 1f)]
         public float Width = 0f;
         [ColorUsage(true, true)]
         public Color Lines = Color.white.With(a: 0.5f);
         public InstrumentSettings[] Instruments;
+        public AudioSource Source;
     }
 
     [Serializable]
@@ -94,28 +97,18 @@ public class Main : MonoBehaviour
     [Serializable]
     public sealed class InstrumentSettings
     {
-        public float Duration = 0.25f;
-        public float Fade = 0.25f;
-        public AudioSource Source;
         public AudioClip[] Clips;
     }
 
     sealed class Sound
     {
         public AudioClip Clip;
-        public AudioSource Source;
         public float Volume;
         public float Pitch;
         public float Pan;
-        public float Duration;
-        public float Fade;
-        public Func<bool> Continue;
-        public Action<AudioSource> OnPlay;
-        public Action<AudioSource> OnStop;
     }
 
-    static readonly int[] _pentatonicMajor = { 0, 2, 4, 7, 9 };
-    static readonly int[] _pentatonicMinor = { 0, 3, 5, 7, 10 };
+    static readonly int[] _pentatonic = { 0, 3, 5, 7, 10 };
 
     [StructLayout(LayoutKind.Sequential)]
     public struct ARGB
@@ -140,6 +133,7 @@ public class Main : MonoBehaviour
     public Text FPS;
 
     bool _click;
+    readonly Stack<AudioSource> _sources = new();
 
     IEnumerator Start()
     {
@@ -329,27 +323,25 @@ public class Main : MonoBehaviour
 
         IEnumerator Play(Sound sound)
         {
-            var source = Instantiate(sound.Source);
+            var source = _sources.TryPop(out var value) && value ? value : Instantiate(Music.Source);
             source.name = sound.Clip.name;
             source.clip = sound.Clip;
-            source.volume = sound.Source.volume * sound.Volume;
-            source.pitch = sound.Source.pitch * sound.Pitch;
-            source.panStereo = sound.Source.panStereo + sound.Pan;
+            source.volume = sound.Volume;
+            source.pitch = sound.Pitch;
+            source.panStereo = sound.Pan;
             source.Play();
-            sound.OnPlay?.Invoke(source);
 
-            for (var counter = 0f; counter < sound.Duration && source.isPlaying && sound.Continue(); counter += Time.deltaTime)
+            for (var counter = 0f; counter < Music.Duration && source.isPlaying; counter += Time.deltaTime)
                 yield return null;
 
-            for (var counter = 0f; counter < sound.Fade && source.isPlaying; counter += Time.deltaTime)
+            for (var counter = 0f; counter < Music.Fade && source.isPlaying; counter += Time.deltaTime)
             {
-                source.volume = sound.Volume * (1f - Mathf.Clamp01(counter / sound.Fade));
+                source.volume = sound.Volume * (1f - Mathf.Clamp01(counter / Music.Fade));
                 yield return null;
             }
 
             source.Stop();
-            sound.OnStop?.Invoke(source);
-            Destroy(source.gameObject);
+            _sources.Push(source);
         }
 
         void Sound(Vector2 position, Color color)
@@ -358,27 +350,15 @@ public class Main : MonoBehaviour
             if (value < Music.Threshold) return;
 
             var index = (int)(position.x + position.y * width);
-            var note = Snap((int)(position.y / height * 80f), _pentatonicMinor);
+            var note = Snap((int)(position.y / height * 80f), _pentatonic);
             if (Music.Instruments.TryAt((int)(hue * Music.Instruments.Length), out var instrument) &&
                 instrument.Clips.TryAt(note / 12, out var clip))
                 sounds.add.Add(new Sound
                 {
                     Clip = clip,
-                    Source = instrument.Source,
                     Volume = value * value,
                     Pitch = Mathf.Pow(2, note % 12 / 12f),
                     Pan = Mathf.Clamp01(position.x / width) * 2f - 1f,
-                    Duration = instrument.Duration,
-                    Fade = instrument.Duration,
-                    Continue = () =>
-                    {
-                        // var pixel = camera.read[index];
-                        // Color.RGBToHSV(pixel, out _, out _, out var value);
-                        // return value >= Music.Threshold;
-                        return true;
-                    },
-                    // OnPlay = source => sources[index] = source,
-                    // OnStop = _ => sources[index] = null,
                 });
         }
 
