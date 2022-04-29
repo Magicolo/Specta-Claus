@@ -80,8 +80,8 @@ public class Main : MonoBehaviour
         public float Width = 0f;
         [ColorUsage(true, true)]
         public Color Lines = Color.white.With(a: 0.5f);
-        public InstrumentSettings[] Instruments;
         public AudioSource Source;
+        public AudioClip[] Clips;
     }
 
     [Serializable]
@@ -92,12 +92,6 @@ public class Main : MonoBehaviour
         public float Speed = 0.25f;
         [Range(0f, 1f)]
         public float Blend = 0.25f;
-    }
-
-    [Serializable]
-    public sealed class InstrumentSettings
-    {
-        public AudioClip[] Clips;
     }
 
     sealed class Sound
@@ -133,7 +127,12 @@ public class Main : MonoBehaviour
     public Text FPS;
 
     bool _click;
+    AudioClip[][] _clips = { };
     readonly Stack<AudioSource> _sources = new();
+
+    void Awake() => _clips = Music.Clips
+        .GroupBy(clip => clip.name.Split('_')[0]).Select(group => group.ToArray())
+        .ToArray();
 
     IEnumerator Start()
     {
@@ -351,8 +350,7 @@ public class Main : MonoBehaviour
 
             var index = (int)(position.x + position.y * width);
             var note = Snap((int)(position.y / height * 80f), _pentatonic);
-            if (Music.Instruments.TryAt((int)(hue * Music.Instruments.Length), out var instrument) &&
-                instrument.Clips.TryAt(note / 12, out var clip))
+            if (_clips.TryAt((int)(hue * _clips.Length), out var clips) && clips.TryAt(note / 12, out var clip))
                 sounds.add.Add(new Sound
                 {
                     Clip = clip,
