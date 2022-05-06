@@ -1,4 +1,4 @@
-<REAPER_PROJECT 0.1 "6.56/win64" 1651264822
+<REAPER_PROJECT 0.1 "6.56/win64" 1651350342
   <NOTES 0 2
   >
   RIPPLE 0
@@ -90,5 +90,143 @@
     DEFSHAPE 1 -1 -1
   >
   <PROJBAY
+  >
+  <TRACK {78E625AD-2781-422C-88FF-45FF8936FF8F}
+    NAME 353691__tec-studio__drip3
+    PEAKCOL 16576
+    BEAT -1
+    AUTOMODE 0
+    VOLPAN 1 0 -1 -1 1
+    MUTESOLO 0 0 0
+    IPHASE 0
+    PLAYOFFS 0 1
+    ISBUS 0 0
+    BUSCOMP 0 0 0 0 0
+    SHOWINMIX 1 0.6667 0.5 1 0.5 -1 -1 -1
+    SEL 0
+    REC 0 0 1 0 0 0 0
+    VU 2
+    TRACKHEIGHT 0 0 0 0 0 0
+    INQ 0 0 0 0.5 100 0 0 100
+    NCHAN 2
+    FX 1
+    TRACKID {78E625AD-2781-422C-88FF-45FF8936FF8F}
+    PERF 0
+    MIDIOUT -1
+    MAINSEND 1 0
+    <ITEM
+      POSITION 0
+      SNAPOFFS 0
+      LENGTH 0.2243537414966
+      LOOP 1
+      ALLTAKES 0
+      FADEIN 1 0.01 0 1 0 0 0
+      FADEOUT 1 0.01 0 1 0 0 0
+      MUTE 0 0
+      SEL 1
+      IGUID {047D259C-F74E-4E16-9D0E-D6E47BC2DDBC}
+      IID 1
+      NAME 353691__tec-studio__drip3.mp3
+      VOLPAN 1 0 1 -1
+      SOFFS 0
+      PLAYRATE 1 1 0 -1 0 0.0025
+      CHANMODE 0
+      GUID {32044ED0-9F60-496D-B52C-693AC03E2A38}
+      <SOURCE MP3
+        FILE "C:\Users\strat\Desktop\353691__tec-studio__drip3.mp3" 1
+      >
+    >
+  >
+  <TRACK {8DEAA756-399E-440F-AACC-3EEAB80E68D9}
+    NAME 543649__legnalegna55__water-droplets
+    PEAKCOL 16576
+    BEAT -1
+    AUTOMODE 0
+    VOLPAN 1 0 -1 -1 1
+    MUTESOLO 0 0 0
+    IPHASE 0
+    PLAYOFFS 0 1
+    ISBUS 0 0
+    BUSCOMP 0 0 0 0 0
+    SHOWINMIX 1 0.6667 0.5 1 0.5 -1 -1 -1
+    SEL 0
+    REC 0 0 1 0 0 0 0
+    VU 2
+    TRACKHEIGHT 0 0 0 0 0 0
+    INQ 0 0 0 0.5 100 0 0 100
+    NCHAN 2
+    FX 1
+    TRACKID {8DEAA756-399E-440F-AACC-3EEAB80E68D9}
+    PERF 0
+    MIDIOUT -1
+    MAINSEND 1 0
+    <ITEM
+      POSITION 0
+      SNAPOFFS 0
+      LENGTH 11.88675736961451
+      LOOP 1
+      ALLTAKES 0
+      FADEIN 1 0.01 0 1 0 0 0
+      FADEOUT 1 0.01 0 1 0 0 0
+      MUTE 0 0
+      SEL 1
+      IGUID {21E13C6D-5465-416F-8F52-4712E3E64853}
+      IID 2
+      NAME 543649__legnalegna55__water-droplets.mp3
+      VOLPAN 1 0 1 -1
+      SOFFS 0
+      PLAYRATE 1 1 0 -1 0 0.0025
+      CHANMODE 0
+      GUID {4BF6C83B-FADA-4D9A-931A-FC0017856F59}
+      <SOURCE MP3
+        FILE "C:\Users\strat\Desktop\543649__legnalegna55__water-droplets.mp3" 1
+      >
+    >
+  >
+  <TRACK {63F8C392-D551-48A2-A4A3-44177EEC8476}
+    NAME 386437__giddster__water-splash-drops-1
+    PEAKCOL 16576
+    BEAT -1
+    AUTOMODE 0
+    VOLPAN 1 0 -1 -1 1
+    MUTESOLO 0 0 0
+    IPHASE 0
+    PLAYOFFS 0 1
+    ISBUS 0 0
+    BUSCOMP 0 0 0 0 0
+    SHOWINMIX 1 0.6667 0.5 1 0.5 -1 -1 -1
+    SEL 0
+    REC 0 0 1 0 0 0 0
+    VU 2
+    TRACKHEIGHT 0 0 0 0 0 0
+    INQ 0 0 0 0.5 100 0 0 100
+    NCHAN 2
+    FX 1
+    TRACKID {63F8C392-D551-48A2-A4A3-44177EEC8476}
+    PERF 0
+    MIDIOUT -1
+    MAINSEND 1 0
+    <ITEM
+      POSITION 0
+      SNAPOFFS 0
+      LENGTH 13.42859410430839
+      LOOP 1
+      ALLTAKES 0
+      FADEIN 1 0.01 0 1 0 0 0
+      FADEOUT 1 0.01 0 1 0 0 0
+      MUTE 0 0
+      SEL 1
+      IGUID {C0DE31F0-42A4-429A-89A6-4C6436171219}
+      IID 3
+      NAME 386437__giddster__water-splash-drops-1.wav
+      VOLPAN 1 0 1 -1
+      SOFFS 0
+      PLAYRATE 1 1 0 -1 0 0.0025
+      CHANMODE 0
+      GUID {D39042F4-2A29-4C5E-BCC0-AAFE51C0114D}
+      <SOURCE WAVE
+        FILE "C:\Users\strat\Desktop\386437__giddster__water-splash-drops-1.wav"
+      >
+    >
   >
 >

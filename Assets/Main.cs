@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Unity.Collections;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.UI;
@@ -43,6 +44,14 @@ public class Main : MonoBehaviour
         public float Threshold = 0.5f;
         public float Contrast = 5;
         public float Jitter = 3f;
+        [Range(0f, 1f)]
+        public float Shape = 0.5f;
+        [Range(-1f, 1f)]
+        public float Inside = 0f;
+        [Range(-1f, 1f)]
+        public float Border = 1f;
+        [Range(0f, 1f)]
+        public float Unite = 0.5f;
         public PolarizeSettings Polarize = new();
         public Camera Camera;
     }
@@ -76,10 +85,6 @@ public class Main : MonoBehaviour
         public float Duration = 0.1f;
         public float Fade = 0.1f;
         public Vector2Int Octaves = new(4, 8);
-        [Range(0f, 1f)]
-        public float Width = 0f;
-        [ColorUsage(true, true)]
-        public Color Lines = Color.white.With(a: 0.5f);
         public AudioSource Source;
         public AudioClip[] Clips;
     }
@@ -92,6 +97,8 @@ public class Main : MonoBehaviour
         public float Speed = 0.25f;
         [Range(0f, 1f)]
         public float Blend = 0.25f;
+        [Range(0f, 10f)]
+        public float Adapt = 1f;
     }
 
     sealed class Sound
@@ -100,6 +107,22 @@ public class Main : MonoBehaviour
         public float Volume;
         public float Pitch;
         public float Pan;
+    }
+
+    sealed class Shape
+    {
+        public int Pixels;
+        public Color Color;
+    }
+
+    struct Datum
+    {
+        public Vector2 Velocity;
+        public Color Particle;
+        public Color Last;
+        public Color Add;
+        public Shape Shape;
+        public TimeSpan Delta;
     }
 
     static readonly int[] _pentatonic = { 0, 3, 5, 7, 10 };
@@ -146,15 +169,14 @@ public class Main : MonoBehaviour
         var (width, height) = (texture.width, texture.height);
         var random = new Random();
         var pixels = new Color[width * height];
+        var cursor = Cursor.Color;
         var camera = (
             texture,
             buffer: new NativeArray<ARGB>(width * height, Allocator.Persistent),
-            last: new Color[pixels.Length],
             read: new ARGB[pixels.Length],
             write: new ARGB[pixels.Length]);
-        var lines = (tempo: 0, duration: 0, width: 0f, color: default(Color), pixels: new Color[pixels.Length]);
         var fps = (deltas: default(TimeSpan[]), index: 0);
-        var particles = new (Vector2 velocity, Color color, TimeSpan delta)[pixels.Length];
+        var data = new Datum[pixels.Length];
         var sounds = (add: new List<Sound>(), play: new List<Sound>());
         Renderer.sprite = Sprite.Create(
             new Texture2D(width, height, TextureFormat.RGBAFloat, 0, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Point },
@@ -182,8 +204,7 @@ public class Main : MonoBehaviour
                 var cursorColumn = cursorBeat * toColumn;
                 var process = Task.Run(() =>
                 {
-                    UpdateLines();
-                    UpdateParticles(delta);
+                    FirstPass(delta);
                     UpdatePixels(cursorColumn, delta, time);
                 });
 
@@ -220,71 +241,64 @@ public class Main : MonoBehaviour
             }
         }
 
-        void UpdateLines()
-        {
-            if (lines.tempo.Change(Music.Tempo) |
-                lines.duration.Change(Music.Beats) |
-                lines.width.Change(Music.Width) |
-                lines.color.Change(Music.Lines))
-            {
-                for (int i = 0; i < lines.pixels.Length; i++)
-                {
-                    var column = i % width;
-                    var beat = column * (double)Music.Beats / width;
-                    var beatLine = beat - Math.Floor(beat) < Music.Width ? Music.Lines : default;
-                    var bar = beat % 4;
-                    var barLine = bar - Math.Floor(bar) < Music.Width ? Music.Lines : default;
-                    lines.pixels[i] = beatLine + barLine;
-                }
-            }
-        }
-
-        void UpdateParticles(TimeSpan delta)
+        void FirstPass(TimeSpan delta)
         {
             var friction = 1f - Mathf.Clamp01(Particle.Friction * (float)delta.TotalSeconds);
             var fade = 1f - Mathf.Clamp01(Particle.Fade * (float)delta.TotalSeconds);
-            for (int i = 0; i < particles.Length; i++)
+            for (int i = 0; i < data.Length; i++)
             {
-                ref var source = ref particles[i];
-                source.velocity *= friction;
-                source.color *= fade;
+                ref var source = ref data[i];
+                source.Velocity *= friction;
+                source.Particle *= fade;
 
-                var position = new Vector2(i % width, i / width) + source.velocity * (float)source.delta.TotalSeconds;
+                var x = i % width;
+                var y = i / width;
+                var position = new Vector2(x, y) + source.Velocity * (float)source.Delta.TotalSeconds;
                 var index = (int)position.x + (int)position.y * width;
-                if (i == index && source.velocity.magnitude > 0.1f) source.delta += delta;
-                else source.delta = default;
+                if (i == index && source.Velocity.sqrMagnitude > 0.1f * 0.1f) source.Delta += delta;
+                else source.Delta = default;
 
-                if (index >= 0 && index < particles.Length)
+                if (index >= 0 && index < data.Length)
                 {
-                    ref var target = ref particles[index];
-                    target.velocity += source.velocity.Take();
-                    target.color = Color.Lerp(source.color, target.color, 0.5f);
+                    ref var target = ref data[index];
+                    target.Velocity += source.Velocity.Take();
+                    target.Particle = Color.Lerp(source.Particle, target.Particle, 0.5f);
                 }
             }
         }
 
         void UpdatePixels(double column, TimeSpan delta, TimeSpan time)
         {
+            var sum = cursor;
             for (int i = 0; i < pixels.Length; i++)
             {
                 var x = i % width;
+                var y = i / width;
+                ref var datum = ref data[i];
                 var emit = x == (int)column;
-                var cursor = emit ? Cursor.Color.ShiftHue((float)(time.TotalSeconds % 1.0) * Cursor.Speed) : default;
-                var read = Adjust(camera.read[i]);
-                var blur = camera.last[i] = Color.Lerp(camera.last[i], read + cursor, Mathf.Clamp01(Camera.Jitter * (float)delta.TotalSeconds));
-                var pixel = cursor + lines.pixels[i] + particles[i].color + blur;
-                pixels[i] = pixel.Finite();
+                var bar = emit ? cursor : default;
+                var read = Adjust(camera.read[i], out var valid);
+                var shape = Shape(ref datum, x, y, read);
+                datum.Last = Color.Lerp(datum.Last, read + bar + shape, Mathf.Clamp01(Camera.Jitter * (float)delta.TotalSeconds));
+                pixels[i] = (bar + datum.Last + datum.Particle).Finite();
 
-                if (emit)
+                if (valid && emit)
                 {
-                    var ratio = Mathf.Pow(Math.Max(Math.Max(read.r, read.g), read.b), Particle.Power);
+                    sum += shape;
+                    var ratio = Mathf.Pow(Math.Max(Math.Max(shape.r, shape.g), shape.b), Particle.Power);
                     var radius = Mathf.Lerp(Particle.Radius.x, Particle.Radius.y, ratio);
                     var count = Mathf.RoundToInt(Mathf.Lerp(Particle.Count.x, Particle.Count.y, ratio));
                     var position = new Vector2(x, i / width);
-                    Emit(new Vector2(x, i / width), Color.Lerp(read, cursor, Cursor.Blend), radius, count);
-                    Sound(position, read);
+                    Emit(new Vector2(x, i / width), Color.Lerp(shape, cursor, Cursor.Blend), radius, count);
+                    Sound(position, shape);
                 }
             }
+
+            Color.RGBToHSV(sum, out var hue, out var saturation, out _);
+            cursor = cursor.MapHSV(color => (
+                Mathf.Lerp(color.h, hue, (float)delta.TotalSeconds * Cursor.Adapt),
+                Mathf.Lerp(color.s, saturation, (float)delta.TotalSeconds * Cursor.Adapt),
+                color.v));
         }
 
         void UpdateFPS(TimeSpan delta)
@@ -311,11 +325,11 @@ public class Main : MonoBehaviour
                 var x = (int)(position.x + direction.x);
                 var y = (int)(position.y + direction.y);
                 var index = x + y * width;
-                if (index >= 0 && index < particles.Length)
+                if (index >= 0 && index < data.Length)
                 {
-                    ref var target = ref particles[x + y * width];
-                    target.velocity += direction * random.NextFloat(Particle.Speed.x, Particle.Speed.y);
-                    target.color = Color.Lerp(target.color, target.color.Polarize(Particle.Polarize) + shift, Particle.Shine);
+                    ref var target = ref data[index];
+                    target.Velocity += direction * random.NextFloat(Particle.Speed.x, Particle.Speed.y);
+                    target.Particle = Color.Lerp(target.Particle, target.Particle.Polarize(Particle.Polarize) + shift, Particle.Shine);
                 }
             }
         }
@@ -348,7 +362,6 @@ public class Main : MonoBehaviour
             Color.RGBToHSV(color, out var hue, out var saturation, out var value);
             if (value < Music.Threshold) return;
 
-            var index = (int)(position.x + position.y * width);
             var note = Snap((int)(position.y / height * 80f), _pentatonic);
             if (_clips.TryAt((int)(hue * _clips.Length), out var clips) && clips.TryAt(note / 12, out var clip))
                 sounds.add.Add(new Sound
@@ -360,7 +373,62 @@ public class Main : MonoBehaviour
                 });
         }
 
-        Color Adjust(Color color)
+        ref readonly Datum Get(int x, int y) => ref data[x + y * width];
+
+        Color Shape(ref Datum datum, int x, int y, Color pixel)
+        {
+            var left = Math.Max(x - 1, 0);
+            var right = Math.Min(x + 1, width - 1);
+            var bottom = Math.Max(y - 1, 0);
+            var top = Math.Min(y + 1, height - 1);
+            if (datum.Shape == null)
+            {
+                if (Valid(pixel, Camera.Shape))
+                {
+                    // Try to share a shape in the surrounding pixels.
+                    for (int xx = left; xx <= right; xx++)
+                        for (int yy = bottom; yy <= top; yy++)
+                            if (Get(xx, yy).Shape is Shape shape)
+                            {
+                                datum.Shape = shape;
+                                datum.Shape.Pixels++;
+                                datum.Shape.Color += datum.Add = pixel;
+                                return default;
+                            }
+
+                    // No shape was found around this pixel so create one.
+                    datum.Shape = new Shape { Pixels = 1, Color = datum.Add = pixel };
+                    return default;
+                }
+                else return default;
+            }
+            else if (Valid(pixel, Camera.Shape))
+            {
+                // Pixel is still valid in its shape.
+                datum.Shape.Color -= datum.Add;
+                datum.Shape.Color += datum.Add = pixel;
+
+                // Determine if the pixel is on the border of the shape.
+                for (int xx = left; xx <= right; xx++)
+                    for (int yy = bottom; yy <= top; yy++)
+                        if (Get(xx, yy).Shape == null)
+                            return Color.Lerp(pixel, datum.Shape.Color / datum.Shape.Pixels, Camera.Unite) * Camera.Border;
+
+                return Color.Lerp(pixel, datum.Shape.Color / datum.Shape.Pixels, Camera.Unite) * Camera.Inside;
+            }
+            else
+            {
+                // Pixel is now invalid in its shape. Remove it.
+                datum.Shape.Pixels--;
+                datum.Shape.Color -= datum.Add.Take();
+                datum.Shape = default;
+                return pixel;
+            }
+        }
+
+        bool Valid(Color color, float threshold) => color.r >= threshold || color.g >= threshold || color.b >= threshold;
+
+        Color Adjust(Color color, out bool valid)
         {
             color = Color.Lerp(color, color.Polarize(), Camera.Polarize.Pre);
             color *= Camera.Multiply.Pre;
@@ -368,8 +436,8 @@ public class Main : MonoBehaviour
             color.g = Mathf.Pow(color.g, Camera.Contrast);
             color.b = Mathf.Pow(color.b, Camera.Contrast);
             color *= Camera.Multiply.Post;
-            return color.r < Camera.Threshold && color.g < Camera.Threshold && color.b < Camera.Threshold ?
-                default : Color.Lerp(color, color.Polarize(), Camera.Polarize.Post);
+            valid = Valid(color, Camera.Threshold);
+            return valid ? Color.Lerp(color, color.Polarize(), Camera.Polarize.Post) : default;
         }
 
         static int Snap(int note, int[] notes)
