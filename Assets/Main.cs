@@ -298,7 +298,7 @@ public class Main : MonoBehaviour
             cursor = cursor.MapHSV(color => (
                 Mathf.Lerp(color.h, hue, (float)delta.TotalSeconds * Cursor.Adapt),
                 Mathf.Lerp(color.s, saturation, (float)delta.TotalSeconds * Cursor.Adapt),
-                color.v));
+                color.v)).Finite().Clamp(0f, 5f);
         }
 
         void UpdateFPS(TimeSpan delta)
