@@ -272,6 +272,9 @@ Material:
     - _TexWorldScaleEmissive: 1
     - _Thickness: 1
     - _Threshold: 0.5
+    - _Top: 0
+    - _TopLeft: 0
+    - _TopRight: 0
     - _TransmissionEnable: 1
     - _TransparentBackfaceEnable: 0
     - _TransparentCullMode: 2
@@ -300,6 +303,7 @@ Material:
     - _ColorD: {r: 0, g: 0.50999993, b: 0.11999995, a: 1}
     - _ColorE: {r: 0, g: 0.26999995, b: 1, a: 1}
     - _ColorF: {r: 0.45999992, g: 0, b: 0.53999996, a: 1}
+    - _Corners: {r: 1.5, g: 0, b: 0, a: 0}
     - _Cursor: {r: 1, g: 1, b: 1, a: 1}
     - _CursorColor: {r: 4, g: 0, b: 0, a: 1}
     - _DiffusionProfileAsset: {r: 0, g: 0, b: 0, a: 0}

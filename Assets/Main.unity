@@ -804,7 +804,7 @@ MonoBehaviour:
       Post: 1
     Threshold: 0.5
     Contrast: 2.5
-    Jitter: 2.5
+    Jitter: 10
     Shape: 0.75
     Inside: -0.5
     Border: 1
@@ -817,6 +817,8 @@ MonoBehaviour:
     Color: {r: 5.992157, g: 2.4967322, b: 0, a: 1}
     Speed: 0.1
     Blend: 0.25
+    Trail: 25
+    Fade: 10
     Adapt: 2.5
   Music:
     Tempo: 120
@@ -1614,7 +1616,7 @@ Camera:
   near clip plane: 0.3
   far clip plane: 1000
   field of view: 60
-  orthographic: 1
+  orthographic: 0
   orthographic size: 20
   m_Depth: -1
   m_CullingMask:

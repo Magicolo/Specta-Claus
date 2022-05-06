@@ -6,7 +6,6 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Unity.Collections;
-using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.UI;
@@ -97,6 +96,10 @@ public class Main : MonoBehaviour
         public float Speed = 0.25f;
         [Range(0f, 1f)]
         public float Blend = 0.25f;
+        [Range(0f, 100f)]
+        public float Trail = 100f;
+        [Range(0f, 10f)]
+        public float Fade = 5f;
         [Range(0f, 10f)]
         public float Adapt = 1f;
     }
@@ -149,7 +152,8 @@ public class Main : MonoBehaviour
     public Image Renderer;
     public Text FPS;
 
-    bool _click;
+    bool _fps;
+    bool _calibrate;
     AudioClip[][] _clips = { };
     readonly Stack<AudioSource> _sources = new();
 
@@ -178,6 +182,7 @@ public class Main : MonoBehaviour
         var fps = (deltas: default(TimeSpan[]), index: 0);
         var data = new Datum[pixels.Length];
         var sounds = (add: new List<Sound>(), play: new List<Sound>());
+        var render = Camera.Camera.targetTexture;
         Renderer.sprite = Sprite.Create(
             new Texture2D(width, height, TextureFormat.RGBAFloat, 0, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Point },
             new(0, 0, width, height),
@@ -193,8 +198,20 @@ public class Main : MonoBehaviour
 
             var delta = TimeSpan.FromSeconds(Math.Max(60.0 / Music.Tempo * Music.Beats / width, 1.0 / Camera.Rate));
             var current = watch.Elapsed;
-            UpdateInput();
             UpdateFPS(current - time);
+
+            if (_calibrate)
+            {
+                Camera.Camera.targetTexture = null;
+                var request = AsyncGPUReadback.RequestIntoNativeArray(ref camera.buffer, texture);
+                while (!request.done) yield return null;
+                for (int i = 0; i < camera.buffer.Length; i++) pixels[i] = camera.buffer[i];
+                Renderer.sprite.texture.SetPixels(pixels);
+                Renderer.sprite.texture.Apply(false, false);
+                yield return null;
+                continue;
+            }
+            else Camera.Camera.targetTexture = render;
 
             for (int i = 0; i < 10 && current - time >= delta; i++, time += delta)
             {
@@ -228,17 +245,6 @@ public class Main : MonoBehaviour
             }
             // If 'time' is more than '10' frames late, skip the additional frames to prevent a lag spiral.
             while (current - time >= delta) time += delta;
-        }
-
-        void UpdateInput()
-        {
-            if (_click.Take())
-            {
-                var position = Camera.Camera.ScreenToViewportPoint(Input.mousePosition);
-                position.x *= width;
-                position.y *= height;
-                Emit(position, new Color(random.NextFloat(), random.NextFloat(), random.NextFloat(), 1f), 8, 64);
-            }
         }
 
         void FirstPass(TimeSpan delta)
@@ -275,14 +281,14 @@ public class Main : MonoBehaviour
                 var x = i % width;
                 var y = i / width;
                 ref var datum = ref data[i];
-                var emit = x == (int)column;
-                var bar = emit ? cursor : default;
+                var wrap = x > column ? x - width : x;
+                var bar = (float)Math.Pow(1.0 - Math.Clamp(column - wrap, 0, Cursor.Trail) / Cursor.Trail, Cursor.Fade) * cursor;
                 var read = Adjust(camera.read[i], out var valid);
                 var shape = Shape(ref datum, x, y, read);
-                datum.Last = Color.Lerp(datum.Last, read + bar + shape, Mathf.Clamp01(Camera.Jitter * (float)delta.TotalSeconds));
+                datum.Last = Color.Lerp(datum.Last, read + shape, Mathf.Clamp01(Camera.Jitter * (float)delta.TotalSeconds));
                 pixels[i] = (bar + datum.Last + datum.Particle).Finite();
 
-                if (valid && emit)
+                if (valid && x == (int)column)
                 {
                     sum += shape;
                     var ratio = Mathf.Pow(Math.Max(Math.Max(shape.r, shape.g), shape.b), Particle.Power);
@@ -303,7 +309,7 @@ public class Main : MonoBehaviour
 
         void UpdateFPS(TimeSpan delta)
         {
-            if (FPS.enabled = Input.GetKey(KeyCode.F))
+            if (FPS.enabled = _fps)
             {
                 fps.deltas ??= new TimeSpan[256];
                 fps.deltas[fps.index++ % fps.deltas.Length] = delta;
@@ -448,5 +454,36 @@ public class Main : MonoBehaviour
         }
     }
 
-    void Update() => _click |= Input.GetMouseButtonDown(0);
+    void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.C)) _calibrate = !_calibrate;
+        if (Input.GetKeyDown(KeyCode.F)) _fps = !_fps;
+
+        if (transform is RectTransform rectangle)
+        {
+            if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+            {
+                if (Input.GetKeyDown(KeyCode.Space)) rectangle.localEulerAngles = rectangle.localEulerAngles.With(x: 0f, y: 0f);
+                if (Input.GetKey(KeyCode.LeftArrow)) rectangle.localEulerAngles += new Vector3(0f, -1f, 0f);
+                if (Input.GetKey(KeyCode.RightArrow)) rectangle.localEulerAngles += new Vector3(0f, 1f, 0f);
+                if (Input.GetKey(KeyCode.DownArrow)) rectangle.localEulerAngles += new Vector3(-1f, 0f, 0f);
+                if (Input.GetKey(KeyCode.UpArrow)) rectangle.localEulerAngles += new Vector3(1f, 0f, 0f);
+            }
+            else if (Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt))
+            {
+                if (Input.GetKeyDown(KeyCode.Space)) rectangle.localEulerAngles = rectangle.localEulerAngles.With(z: 0f);
+                if (Input.GetKey(KeyCode.LeftArrow)) rectangle.localEulerAngles += new Vector3(0f, 0f, -1f);
+                if (Input.GetKey(KeyCode.RightArrow)) rectangle.localEulerAngles += new Vector3(0f, 0f, 1f);
+            }
+            else
+            {
+                var sign = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl) ? -1f : 1f;
+                if (Input.GetKeyDown(KeyCode.Space)) { rectangle.offsetMin = default; rectangle.offsetMax = default; }
+                if (Input.GetKey(KeyCode.LeftArrow)) rectangle.offsetMin += new Vector2(-1f, 0f) * sign;
+                if (Input.GetKey(KeyCode.RightArrow)) rectangle.offsetMax += new Vector2(1f, 0f) * sign;
+                if (Input.GetKey(KeyCode.DownArrow)) rectangle.offsetMin += new Vector2(0f, -1f) * sign;
+                if (Input.GetKey(KeyCode.UpArrow)) rectangle.offsetMax += new Vector2(0f, 1f) * sign;
+            }
+        }
+    }
 }
