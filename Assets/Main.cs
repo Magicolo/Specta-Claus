@@ -243,22 +243,6 @@ public class Main : MonoBehaviour
                             UpdateShape(ref datum, x, y);
                             UpdateBlur(ref datum, delta);
                             sum += UpdatePixel(datum, ref pixels[i], x, y, (int)cursorColumn);
-
-                            var valid = datum.Read.valid;
-                            var shape = datum.Shape.color;
-                            var last = datum.Last;
-                            var particle = datum.Particle.color;
-                            pixels[i] = (bar + last + particle).Finite();
-                            if (valid && x == (int)cursorColumn)
-                            {
-                                sum += shape;
-                                var ratio = Mathf.Pow(Math.Max(Math.Max(shape.r, shape.g), shape.b), Particle.Power);
-                                var radius = Mathf.Lerp(Particle.Radius.x, Particle.Radius.y, ratio);
-                                var count = Mathf.RoundToInt(Mathf.Lerp(Particle.Count.x, Particle.Count.y, ratio));
-                                var position = new Vector2(x, i / width);
-                                Emit(new Vector2(x, i / width), Color.Lerp(shape, cursor, Cursor.Blend), radius, count);
-                                Sound(position, shape);
-                            }
                         }
 
                         Color.RGBToHSV(sum, out var hue, out var saturation, out _);
@@ -331,53 +315,12 @@ public class Main : MonoBehaviour
                 var ratio = Mathf.Pow(Math.Max(Math.Max(shape.r, shape.g), shape.b), Particle.Power);
                 var radius = Mathf.Lerp(Particle.Radius.x, Particle.Radius.y, ratio);
                 var count = Mathf.RoundToInt(Mathf.Lerp(Particle.Count.x, Particle.Count.y, ratio));
-                var position = new Vector2(x, y);
-                Emit(new Vector2(x, y), Color.Lerp(shape, cursor, Cursor.Blend), radius, count);
-                Sound(position, shape);
+                EmitParticle(x, y, Color.Lerp(shape, cursor, Cursor.Blend), radius, count);
+                EmitSound(x, y, shape);
                 return shape;
             }
             else return default;
         }
-
-        // void UpdatePixels(double column, TimeSpan delta, TimeSpan time, int voices)
-        // {
-        //     var sum = cursor;
-        //     for (int i = 0; i < pixels.Length; i++)
-        //     {
-        //         var x = i % width;
-        //         var y = i / width;
-        //         var wrap = x > column ? x - width : x;
-        //         var bar = (float)Math.Pow(1.0 - Math.Clamp(column - wrap, 0, Cursor.Trail) / Cursor.Trail, Cursor.Fade) * cursor;
-
-        //         ref var datum = ref data[i];
-        //         UpdateRead(ref datum, camera.read[i]);
-        //         UpdateShape(ref datum, x, y, datum.Read.color);
-        //         UpdateBlur(ref datum, delta);
-
-        //         var valid = datum.Read.valid;
-        //         var shape = datum.Shape.color;
-        //         var last = datum.Last;
-        //         var particle = datum.Particle.color;
-        //         pixels[i] = (bar + last + particle).Finite();
-
-        //         if (valid && x == (int)column)
-        //         {
-        //             sum += shape;
-        //             var ratio = Mathf.Pow(Math.Max(Math.Max(shape.r, shape.g), shape.b), Particle.Power);
-        //             var radius = Mathf.Lerp(Particle.Radius.x, Particle.Radius.y, ratio);
-        //             var count = Mathf.RoundToInt(Mathf.Lerp(Particle.Count.x, Particle.Count.y, ratio));
-        //             var position = new Vector2(x, i / width);
-        //             Emit(new Vector2(x, i / width), Color.Lerp(shape, cursor, Cursor.Blend), radius, count);
-        //             Sound(position, shape);
-        //         }
-        //     }
-
-        //     Color.RGBToHSV(sum, out var hue, out var saturation, out _);
-        //     cursor = cursor.MapHSV(color => (
-        //         Mathf.Lerp(color.h, hue, (float)delta.TotalSeconds * Cursor.Adapt),
-        //         Mathf.Lerp(color.s, saturation, (float)delta.TotalSeconds * Cursor.Adapt),
-        //         color.v)).Finite().Clamp(0f, 5f);
-        // }
 
         void UpdateFPS(TimeSpan delta)
         {
@@ -394,15 +337,14 @@ public class Main : MonoBehaviour
             }
         }
 
-        void Emit(Vector2 position, Color color, float radius, int count)
+        void EmitParticle(int x, int y, Color color, float radius, int count)
         {
             var shift = color.ShiftHue(Particle.Shift);
             for (int i = 0; i < count; i++)
             {
                 var direction = new Vector2(random.NextFloat(-radius, radius * Particle.Forward), random.NextFloat(-radius, radius));
-                var x = (int)(position.x + direction.x).Wrap(width);
-                var y = (int)(position.y + direction.y).Wrap(height);
-                ref var particle = ref data[x + y * width].Particle;
+                var position = (x: (int)(x + direction.x).Wrap(width), y: (int)(y + direction.y).Wrap(height));
+                ref var particle = ref data[position.x + position.y * width].Particle;
                 particle = (
                     Color.Lerp(particle.color, particle.color.Polarize(Particle.Polarize) + shift, Particle.Shine),
                     particle.velocity + direction * random.NextFloat(Particle.Speed.x, Particle.Speed.y),
@@ -433,19 +375,19 @@ public class Main : MonoBehaviour
             _sources.Push(source);
         }
 
-        void Sound(Vector2 position, Color color)
+        void EmitSound(int x, int y, Color color)
         {
             Color.RGBToHSV(color, out var hue, out var saturation, out var value);
             if (value < Music.Threshold) return;
 
-            var note = Snap((int)(position.y / height * 80f), _pentatonic);
+            var note = Snap((int)((float)y / height * 80f), _pentatonic);
             if (_clips.TryAt((int)(hue * _clips.Length), out var clips) && clips.TryAt(note / 12, out var clip))
                 sounds.add.Add(new Sound
                 {
                     Clip = clip,
                     Volume = value * value,
                     Pitch = Mathf.Pow(2, note % 12 / 12f),
-                    Pan = Mathf.Clamp01(position.x / width) * 2f - 1f,
+                    Pan = Mathf.Clamp01((float)x / width) * 2f - 1f,
                 });
         }
 
