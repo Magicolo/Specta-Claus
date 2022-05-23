@@ -263,6 +263,15 @@ public static class Extensions
         return value;
     }
 
+    public static int Wrap(this int value, int bound) => (value < 0 ? (bound + value % bound) : value) % bound;
+    public static long Wrap(this long value, long bound) => (value < 0 ? (bound + value % bound) : value) % bound;
+    public static float Wrap(this float value, float bound) => (value < 0 ? (bound + value % bound) : value) % bound;
+    public static double Wrap(this double value, double bound) => (value < 0 ? (bound + value % bound) : value) % bound;
+    public static Vector2 Wrap(this Vector2 value, Vector2 bound) => new(value.x.Wrap(bound.x), value.y.Wrap(bound.y));
+    public static Vector3 Wrap(this Vector3 value, Vector3 bound) => new(value.x.Wrap(bound.x), value.y.Wrap(bound.y), value.z.Wrap(bound.z));
+    public static Vector4 Wrap(this Vector4 value, Vector4 bound) => new(value.x.Wrap(bound.x), value.y.Wrap(bound.y), value.z.Wrap(bound.z), value.w.Wrap(bound.w));
+    public static Color Wrap(this Color value, Color bound) => new(value.r.Wrap(bound.r), value.g.Wrap(bound.g), value.b.Wrap(bound.b), value.a.Wrap(bound.a));
+
     public static double AsDouble(this float value) => value;
     public static double AsDouble(this short value) => value;
     public static double AsDouble(this ushort value) => value;
