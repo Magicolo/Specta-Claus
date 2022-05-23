@@ -1,9 +1,11 @@
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Unity.Collections;
 using UnityEngine;
@@ -114,18 +116,16 @@ public class Main : MonoBehaviour
 
     sealed class Shape
     {
-        public int Pixels;
         public Color Color;
+        public int Pixels;
     }
 
     struct Datum
     {
-        public Vector2 Velocity;
-        public Color Particle;
         public Color Last;
-        public Color Add;
-        public Shape Shape;
-        public TimeSpan Delta;
+        public (Color color, Vector2 velocity, TimeSpan delta) Particle;
+        public (Color color, bool valid) Read;
+        public (Color color, Color add, Shape shape) Shape;
     }
 
     static readonly int[] _pentatonic = { 0, 3, 5, 7, 10 };
@@ -209,103 +209,175 @@ public class Main : MonoBehaviour
                 Renderer.sprite.texture.SetPixels(pixels);
                 Renderer.sprite.texture.Apply(false, false);
                 yield return null;
-                continue;
             }
-            else Camera.Camera.targetTexture = render;
-
-            for (int i = 0; i < 10 && current - time >= delta; i++, time += delta)
+            else
             {
-                var toBeat = (double)Music.Beats / width;
-                var toColumn = (double)width / Music.Beats;
-                var cursorBeat = time.TotalMinutes * Music.Tempo % Music.Beats;
-                var cursorColumn = cursorBeat * toColumn;
-                var process = Task.Run(() =>
+                Camera.Camera.targetTexture = render;
+
+                for (int i = 0; i < 10 && current - time >= delta; i++, time += delta)
                 {
-                    FirstPass(delta);
-                    UpdatePixels(cursorColumn, delta, time);
-                });
+                    var process = Task.Run(() =>
+                    {
+                        var toBeat = (double)Music.Beats / width;
+                        var toColumn = (double)width / Music.Beats;
+                        var cursorBeat = time.TotalMinutes * Music.Tempo % Music.Beats;
+                        var cursorColumn = cursorBeat * toColumn;
+                        var friction = 1f - Mathf.Clamp01(Particle.Friction * (float)delta.TotalSeconds);
+                        var fade = 1f - Mathf.Clamp01(Particle.Fade * (float)delta.TotalSeconds);
+                        var sum = cursor;
 
-                var request = AsyncGPUReadback.RequestIntoNativeArray(ref camera.buffer, texture);
+                        // Pass 1
+                        for (int i = 0; i < data.Length; i++)
+                            UpdateParticle(ref data[i], i % width, i / width, friction, fade, delta);
 
-                for (int j = 0; j < Music.Voices && j < sounds.play.Count; j++)
-                    StartCoroutine(Play(sounds.play[UnityEngine.Random.Range(0, sounds.play.Count)]));
-                sounds.play.Clear();
+                        // Pass 2
+                        for (int i = 0; i < data.Length; i++)
+                        {
+                            ref var datum = ref data[i];
+                            var x = i % width;
+                            var y = i / width;
+                            var wrap = x > cursorColumn ? x - width : x;
+                            var bar = (float)Math.Pow(1.0 - Math.Clamp(cursorColumn - wrap, 0, Cursor.Trail) / Cursor.Trail, Cursor.Fade) * cursor;
 
-                while (!request.done) yield return null;
-                camera.buffer.CopyTo(camera.write);
-                while (!process.IsCompleted) yield return null;
-                if (process.IsFaulted) Debug.LogException(process.Exception);
-                // The swaps must be done after 'process' is complete since it uses both the 'read' and 'last' buffers.
-                (camera.write, camera.read) = (camera.read, camera.write);
-                (sounds.add, sounds.play) = (sounds.play, sounds.add);
+                            UpdateRead(ref datum, camera.read[i]);
+                            UpdateShape(ref datum, x, y);
+                            UpdateBlur(ref datum, delta);
+                            sum += UpdatePixel(datum, ref pixels[i], x, y, (int)cursorColumn);
 
-                Renderer.sprite.texture.SetPixels(pixels);
-                Renderer.sprite.texture.Apply(false, false);
-                yield return null;
-            }
-            // If 'time' is more than '10' frames late, skip the additional frames to prevent a lag spiral.
-            while (current - time >= delta) time += delta;
-        }
+                            var valid = datum.Read.valid;
+                            var shape = datum.Shape.color;
+                            var last = datum.Last;
+                            var particle = datum.Particle.color;
+                            pixels[i] = (bar + last + particle).Finite();
+                            if (valid && x == (int)cursorColumn)
+                            {
+                                sum += shape;
+                                var ratio = Mathf.Pow(Math.Max(Math.Max(shape.r, shape.g), shape.b), Particle.Power);
+                                var radius = Mathf.Lerp(Particle.Radius.x, Particle.Radius.y, ratio);
+                                var count = Mathf.RoundToInt(Mathf.Lerp(Particle.Count.x, Particle.Count.y, ratio));
+                                var position = new Vector2(x, i / width);
+                                Emit(new Vector2(x, i / width), Color.Lerp(shape, cursor, Cursor.Blend), radius, count);
+                                Sound(position, shape);
+                            }
+                        }
 
-        void FirstPass(TimeSpan delta)
-        {
-            var friction = 1f - Mathf.Clamp01(Particle.Friction * (float)delta.TotalSeconds);
-            var fade = 1f - Mathf.Clamp01(Particle.Fade * (float)delta.TotalSeconds);
-            for (int i = 0; i < data.Length; i++)
-            {
-                ref var source = ref data[i];
-                source.Velocity *= friction;
-                source.Particle *= fade;
+                        Color.RGBToHSV(sum, out var hue, out var saturation, out _);
+                        cursor = cursor.MapHSV(color => (
+                            Mathf.Lerp(color.h, hue, (float)delta.TotalSeconds * Cursor.Adapt),
+                            Mathf.Lerp(color.s, saturation, (float)delta.TotalSeconds * Cursor.Adapt),
+                            color.v)).Finite().Clamp(0f, 5f);
+                    });
 
-                var x = i % width;
-                var y = i / width;
-                var position = new Vector2(x, y) + source.Velocity * (float)source.Delta.TotalSeconds;
-                var index = (int)position.x + (int)position.y * width;
-                if (i == index && source.Velocity.sqrMagnitude > 0.1f * 0.1f) source.Delta += delta;
-                else source.Delta = default;
+                    var request = AsyncGPUReadback.RequestIntoNativeArray(ref camera.buffer, texture);
 
-                if (index >= 0 && index < data.Length)
-                {
-                    ref var target = ref data[index];
-                    target.Velocity += source.Velocity.Take();
-                    target.Particle = Color.Lerp(source.Particle, target.Particle, 0.5f);
+                    // Play sounds.
+                    for (int j = 0; j < Music.Voices && j < sounds.play.Count; j++)
+                        StartCoroutine(Play(sounds.play[UnityEngine.Random.Range(0, sounds.play.Count)]));
+                    sounds.play.Clear();
+
+                    while (!request.done) yield return null;
+                    camera.buffer.CopyTo(camera.write);
+                    while (!process.IsCompleted) yield return null;
+                    if (process.IsFaulted) Debug.LogException(process.Exception);
+                    // The swaps must be done after 'process' is complete since it uses both the 'read' and 'last' buffers.
+                    (camera.write, camera.read) = (camera.read, camera.write);
+                    (sounds.add, sounds.play) = (sounds.play, sounds.add);
+
+                    Renderer.sprite.texture.SetPixels(pixels);
+                    Renderer.sprite.texture.Apply(false, false);
+                    yield return null;
                 }
+                // If 'time' is more than '10' frames late, skip the additional frames to prevent a lag spiral.
+                while (current - time >= delta) { time += delta; Debug.Log("Skipped a frame."); }
             }
         }
 
-        void UpdatePixels(double column, TimeSpan delta, TimeSpan time)
+        void UpdateParticle(ref Datum datum, int x, int y, float friction, float fade, TimeSpan delta)
         {
-            var sum = cursor;
-            for (int i = 0; i < pixels.Length; i++)
+            ref var particle = ref datum.Particle;
+            particle.velocity *= friction;
+            particle.color *= fade;
+
+            var velocity = particle.velocity * (float)particle.delta.TotalSeconds;
+            if (Mathf.Abs(velocity.x) < 1f && Mathf.Abs(velocity.y) < 1f)
             {
-                var x = i % width;
-                var y = i / width;
-                ref var datum = ref data[i];
-                var wrap = x > column ? x - width : x;
-                var bar = (float)Math.Pow(1.0 - Math.Clamp(column - wrap, 0, Cursor.Trail) / Cursor.Trail, Cursor.Fade) * cursor;
-                var read = Adjust(camera.read[i], out var valid);
-                var shape = Shape(ref datum, x, y, read);
-                datum.Last = Color.Lerp(datum.Last, read + shape, Mathf.Clamp01(Camera.Jitter * (float)delta.TotalSeconds));
-                pixels[i] = (bar + datum.Last + datum.Particle).Finite();
-
-                if (valid && x == (int)column)
-                {
-                    sum += shape;
-                    var ratio = Mathf.Pow(Math.Max(Math.Max(shape.r, shape.g), shape.b), Particle.Power);
-                    var radius = Mathf.Lerp(Particle.Radius.x, Particle.Radius.y, ratio);
-                    var count = Mathf.RoundToInt(Mathf.Lerp(Particle.Count.x, Particle.Count.y, ratio));
-                    var position = new Vector2(x, i / width);
-                    Emit(new Vector2(x, i / width), Color.Lerp(shape, cursor, Cursor.Blend), radius, count);
-                    Sound(position, shape);
-                }
+                if (particle.velocity.sqrMagnitude > 0.01f)
+                    particle.delta += delta;
+                else
+                    particle.delta = default;
             }
-
-            Color.RGBToHSV(sum, out var hue, out var saturation, out _);
-            cursor = cursor.MapHSV(color => (
-                Mathf.Lerp(color.h, hue, (float)delta.TotalSeconds * Cursor.Adapt),
-                Mathf.Lerp(color.s, saturation, (float)delta.TotalSeconds * Cursor.Adapt),
-                color.v)).Finite().Clamp(0f, 5f);
+            else
+            {
+                var position = (x: (int)(x + velocity.x).Wrap(width), y: (int)(y + velocity.y).Wrap(height));
+                ref var target = ref data[position.x + position.y * width].Particle;
+                target.velocity += particle.velocity.Take();
+                target.color = Color.Lerp(particle.color, target.color, 0.5f);
+                particle.delta = default;
+            }
         }
+
+        Color UpdatePixel(in Datum datum, ref Color pixel, int x, int y, int column)
+        {
+            var wrap = x > column ? x - width : x;
+            var bar = (float)Math.Pow(1.0 - Math.Clamp(column - wrap, 0, Cursor.Trail) / Cursor.Trail, Cursor.Fade) * cursor;
+            var valid = datum.Read.valid;
+            var shape = datum.Shape.color;
+            var last = datum.Last;
+            var particle = datum.Particle.color;
+            pixel = (bar + last + particle).Finite();
+
+            if (valid && x == column)
+            {
+                var ratio = Mathf.Pow(Math.Max(Math.Max(shape.r, shape.g), shape.b), Particle.Power);
+                var radius = Mathf.Lerp(Particle.Radius.x, Particle.Radius.y, ratio);
+                var count = Mathf.RoundToInt(Mathf.Lerp(Particle.Count.x, Particle.Count.y, ratio));
+                var position = new Vector2(x, y);
+                Emit(new Vector2(x, y), Color.Lerp(shape, cursor, Cursor.Blend), radius, count);
+                Sound(position, shape);
+                return shape;
+            }
+            else return default;
+        }
+
+        // void UpdatePixels(double column, TimeSpan delta, TimeSpan time, int voices)
+        // {
+        //     var sum = cursor;
+        //     for (int i = 0; i < pixels.Length; i++)
+        //     {
+        //         var x = i % width;
+        //         var y = i / width;
+        //         var wrap = x > column ? x - width : x;
+        //         var bar = (float)Math.Pow(1.0 - Math.Clamp(column - wrap, 0, Cursor.Trail) / Cursor.Trail, Cursor.Fade) * cursor;
+
+        //         ref var datum = ref data[i];
+        //         UpdateRead(ref datum, camera.read[i]);
+        //         UpdateShape(ref datum, x, y, datum.Read.color);
+        //         UpdateBlur(ref datum, delta);
+
+        //         var valid = datum.Read.valid;
+        //         var shape = datum.Shape.color;
+        //         var last = datum.Last;
+        //         var particle = datum.Particle.color;
+        //         pixels[i] = (bar + last + particle).Finite();
+
+        //         if (valid && x == (int)column)
+        //         {
+        //             sum += shape;
+        //             var ratio = Mathf.Pow(Math.Max(Math.Max(shape.r, shape.g), shape.b), Particle.Power);
+        //             var radius = Mathf.Lerp(Particle.Radius.x, Particle.Radius.y, ratio);
+        //             var count = Mathf.RoundToInt(Mathf.Lerp(Particle.Count.x, Particle.Count.y, ratio));
+        //             var position = new Vector2(x, i / width);
+        //             Emit(new Vector2(x, i / width), Color.Lerp(shape, cursor, Cursor.Blend), radius, count);
+        //             Sound(position, shape);
+        //         }
+        //     }
+
+        //     Color.RGBToHSV(sum, out var hue, out var saturation, out _);
+        //     cursor = cursor.MapHSV(color => (
+        //         Mathf.Lerp(color.h, hue, (float)delta.TotalSeconds * Cursor.Adapt),
+        //         Mathf.Lerp(color.s, saturation, (float)delta.TotalSeconds * Cursor.Adapt),
+        //         color.v)).Finite().Clamp(0f, 5f);
+        // }
 
         void UpdateFPS(TimeSpan delta)
         {
@@ -328,15 +400,13 @@ public class Main : MonoBehaviour
             for (int i = 0; i < count; i++)
             {
                 var direction = new Vector2(random.NextFloat(-radius, radius * Particle.Forward), random.NextFloat(-radius, radius));
-                var x = (int)(position.x + direction.x);
-                var y = (int)(position.y + direction.y);
-                var index = x + y * width;
-                if (index >= 0 && index < data.Length)
-                {
-                    ref var target = ref data[index];
-                    target.Velocity += direction * random.NextFloat(Particle.Speed.x, Particle.Speed.y);
-                    target.Particle = Color.Lerp(target.Particle, target.Particle.Polarize(Particle.Polarize) + shift, Particle.Shine);
-                }
+                var x = (int)(position.x + direction.x).Wrap(width);
+                var y = (int)(position.y + direction.y).Wrap(height);
+                ref var particle = ref data[x + y * width].Particle;
+                particle = (
+                    Color.Lerp(particle.color, particle.color.Polarize(Particle.Polarize) + shift, Particle.Shine),
+                    particle.velocity + direction * random.NextFloat(Particle.Speed.x, Particle.Speed.y),
+                    particle.delta);
             }
         }
 
@@ -381,60 +451,59 @@ public class Main : MonoBehaviour
 
         ref readonly Datum Get(int x, int y) => ref data[x + y * width];
 
-        Color Shape(ref Datum datum, int x, int y, Color pixel)
+        void UpdateShape(ref Datum datum, int x, int y)
         {
+            ref var shape = ref datum.Shape;
+            var read = datum.Read.color;
             var left = Math.Max(x - 1, 0);
             var right = Math.Min(x + 1, width - 1);
             var bottom = Math.Max(y - 1, 0);
             var top = Math.Min(y + 1, height - 1);
-            if (datum.Shape == null)
+            if (shape.shape == null)
             {
-                if (Valid(pixel, Camera.Shape))
+                if (Valid(read, Camera.Shape))
                 {
                     // Try to share a shape in the surrounding pixels.
                     for (int xx = left; xx <= right; xx++)
                         for (int yy = bottom; yy <= top; yy++)
-                            if (Get(xx, yy).Shape is Shape shape)
+                            if (Get(xx, yy).Shape.shape is Shape other)
                             {
-                                datum.Shape = shape;
-                                datum.Shape.Pixels++;
-                                datum.Shape.Color += datum.Add = pixel;
-                                return default;
+                                other.Pixels++;
+                                other.Color += read;
+                                shape = (default, read, other);
+                                return;
                             }
 
                     // No shape was found around this pixel so create one.
-                    datum.Shape = new Shape { Pixels = 1, Color = datum.Add = pixel };
-                    return default;
+                    shape = (default, read, new Shape { Color = read, Pixels = 1 });
                 }
-                else return default;
             }
-            else if (Valid(pixel, Camera.Shape))
+            else if (Valid(read, Camera.Shape))
             {
                 // Pixel is still valid in its shape.
-                datum.Shape.Color -= datum.Add;
-                datum.Shape.Color += datum.Add = pixel;
-
+                shape.shape.Color -= shape.add;
+                shape.shape.Color += shape.add = read;
                 // Determine if the pixel is on the border of the shape.
                 for (int xx = left; xx <= right; xx++)
                     for (int yy = bottom; yy <= top; yy++)
-                        if (Get(xx, yy).Shape == null)
-                            return Color.Lerp(pixel, datum.Shape.Color / datum.Shape.Pixels, Camera.Unite) * Camera.Border;
+                        if (Get(xx, yy).Shape.shape != shape.shape)
+                        {
+                            datum.Shape.color = Color.Lerp(read, shape.shape.Color / shape.shape.Pixels, Camera.Unite) * Camera.Border;
+                            return;
+                        }
 
-                return Color.Lerp(pixel, datum.Shape.Color / datum.Shape.Pixels, Camera.Unite) * Camera.Inside;
+                datum.Shape.color = Color.Lerp(read, shape.shape.Color / shape.shape.Pixels, Camera.Unite) * Camera.Inside;
             }
             else
             {
                 // Pixel is now invalid in its shape. Remove it.
-                datum.Shape.Pixels--;
-                datum.Shape.Color -= datum.Add.Take();
-                datum.Shape = default;
-                return pixel;
+                shape.shape.Pixels--;
+                shape.shape.Color -= shape.add;
+                shape = (read, default, default);
             }
         }
 
-        bool Valid(Color color, float threshold) => color.r >= threshold || color.g >= threshold || color.b >= threshold;
-
-        Color Adjust(Color color, out bool valid)
+        void UpdateRead(ref Datum datum, Color color)
         {
             color = Color.Lerp(color, color.Polarize(), Camera.Polarize.Pre);
             color *= Camera.Multiply.Pre;
@@ -442,9 +511,17 @@ public class Main : MonoBehaviour
             color.g = Mathf.Pow(color.g, Camera.Contrast);
             color.b = Mathf.Pow(color.b, Camera.Contrast);
             color *= Camera.Multiply.Post;
-            valid = Valid(color, Camera.Threshold);
-            return valid ? Color.Lerp(color, color.Polarize(), Camera.Polarize.Post) : default;
+
+            var valid = Valid(color, Camera.Threshold);
+            datum.Read = (valid ? Color.Lerp(color, color.Polarize(), Camera.Polarize.Post) : default, valid);
         }
+
+        void UpdateBlur(ref Datum datum, TimeSpan delta)
+        {
+            datum.Last = Color.Lerp(datum.Last, datum.Read.color + datum.Shape.color, Mathf.Clamp01(Camera.Jitter * (float)delta.TotalSeconds));
+        }
+
+        static bool Valid(Color color, float threshold) => color.r >= threshold || color.g >= threshold || color.b >= threshold;
 
         static int Snap(int note, int[] notes)
         {
