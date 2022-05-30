@@ -154,7 +154,7 @@ float4 sobel(int2 index, int2 size)
 float4 colorize(float4 color, float amount)
 {
     const float3 hsv = rgb2hsv(color.xyz);
-    const float3 rgb = hsv2rgb(float3(hsv.x, clamp(hsv.y * amount, 0.0, 1.0), hsv.z));
+    const float3 rgb = hsv2rgb(float3(hsv.x, clamp(hsv.y * (1.0 + amount), 0.0, 1.0), hsv.z));
     return float4(rgb, color.w);
 }
 
@@ -190,6 +190,7 @@ void Update(uint3 id : SV_DispatchThreadID)
     const float ParticleFriction = 15;
     const float ParticleFade = 15;
     const float ParticleTrail = 25;
+    const float ParticleColorize = 2.5;
 
     const float CursorTrail = 25;
     const float CursorFade = 10;
@@ -260,6 +261,7 @@ void Update(uint3 id : SV_DispatchThreadID)
         neighboor7.Color +
         neighboor8.Color;
     particleColor *= fade;
+    particleColor = colorize(particleColor, ParticleColorize * Delta);
     particleColor = clamp(particleColor, 0, 100);
 
 
