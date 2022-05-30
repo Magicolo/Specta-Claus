@@ -1,11 +1,9 @@
 using System;
 using System.Collections;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Threading;
 using System.Threading.Tasks;
 using Unity.Collections;
 using UnityEngine;
@@ -123,7 +121,7 @@ public class Main : MonoBehaviour
     struct Datum
     {
         public Color Last;
-        public (Color color, Vector2 velocity, TimeSpan delta) Particle;
+        public (Color color, Vector2 velocity, Vector2 remain) Particle;
         public (Color color, bool valid) Read;
         public (Color color, Color add, Shape shape) Shape;
     }
@@ -282,13 +280,10 @@ public class Main : MonoBehaviour
             particle.velocity *= friction;
             particle.color *= fade;
 
-            var velocity = particle.velocity * (float)particle.delta.TotalSeconds;
+            var velocity = particle.velocity * (float)delta.TotalSeconds + particle.remain.Take();
             if (Mathf.Abs(velocity.x) < 1f && Mathf.Abs(velocity.y) < 1f)
             {
-                if (particle.velocity.sqrMagnitude > 0.01f)
-                    particle.delta += delta;
-                else
-                    particle.delta = default;
+                if (particle.velocity.sqrMagnitude > 0.01f) particle.remain = velocity;
             }
             else
             {
@@ -296,7 +291,6 @@ public class Main : MonoBehaviour
                 ref var target = ref data[position.x + position.y * width].Particle;
                 target.velocity += particle.velocity.Take();
                 target.color = Color.Lerp(particle.color, target.color, 0.5f);
-                particle.delta = default;
             }
         }
 
@@ -348,7 +342,7 @@ public class Main : MonoBehaviour
                 particle = (
                     Color.Lerp(particle.color, particle.color.Polarize(Particle.Polarize) + shift, Particle.Shine),
                     particle.velocity + direction * random.NextFloat(Particle.Speed.x, Particle.Speed.y),
-                    particle.delta);
+                    particle.remain);
             }
         }
 
