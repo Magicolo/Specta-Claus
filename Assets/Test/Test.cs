@@ -35,9 +35,12 @@ public class Test : MonoBehaviour
         public int Tempo = 120;
         public int Beats = 16;
         public int Voices = 16;
-        public float Threshold = 0.1f;
-        public float Duration = 0.1f;
-        public float Fade = 0.1f;
+        [Range(0f, 1f)]
+        public float Saturate = 0.1f;
+        [Range(0f, 10f)]
+        public float Fade = 2.5f;
+        [Range(0f, 1f)]
+        public float Attenuate = 0.25f;
         public Vector2Int Octaves = new(4, 8);
         public AudioSource Source;
         public AudioClip[] Clips;
@@ -49,10 +52,19 @@ public class Test : MonoBehaviour
         Color = 1,
         Velocity = 2,
         Camera = 3,
-        Blur = 4
+        Blur = 4,
+        Emit = 5,
     }
 
     static readonly int[] _pentatonic = { 0, 3, 5, 7, 10 };
+    static readonly Modes[] _modes = (Modes[])typeof(Modes).GetEnumValues();
+
+    static int Snap(int note, int[] notes)
+    {
+        var source = note % 12;
+        var target = notes.OrderBy(note => Math.Abs(note - source)).FirstOrDefault();
+        return note - source + target;
+    }
 
     [Range(0f, 1f)]
     public float Delta = 0.01f;
@@ -84,26 +96,33 @@ public class Test : MonoBehaviour
         Debug.Log($"Camera: {device.deviceName} | Resolution: {device.width}x{device.height} | FPS: {device.requestedFPS} | Graphics: {device.graphicsFormat}");
 
         var mode = Modes.None;
+        var random = new System.Random();
         var deltas = new Queue<float>();
         var clips = Music.Clips
             .GroupBy(clip => clip.name.Split('_')[0]).Select(group => group.ToArray())
             .ToArray();
         var sources = new Stack<AudioSource>();
-        var routines = new List<(float key, IEnumerator routine)>();
         var size = new Vector2Int(device.width, device.height);
-        var buffer = new NativeArray<Color>(size.x * size.y, Allocator.Persistent);
         var camera = (input: device, output: Texture(size));
         var color = (input: Texture(size), output: Texture(size));
         var velocity = (input: Texture(size), output: Texture(size));
         var blur = (input: Texture(size), output: Texture(size));
+        var emit = (input: Texture(size), output: Texture(size));
         var output = Texture(size);
-        var cursorColor = Cursor.Color;
+        var voices = Enumerable.Range(0, size.y).Select(_ => Instantiate(Music.Source)).ToArray();
+        var cursor = (color: Cursor.Color, hue: 0f, saturation: 0f, value: 0f,
+            sounds: new (AudioClip clip, float volume, float pitch, float pan)[size.y],
+            colors: new Color[size.y],
+            buffer: new NativeArray<Color>(size.x * size.y, Allocator.Persistent));
+        Color.RGBToHSV(Cursor.Color, out cursor.hue, out cursor.saturation, out cursor.value);
+
+        for (int y = 0; y < size.y; y++) StartCoroutine(Sound(y));
 
         // Wait until fps has stabilized.
         for (int i = 0; i < 10; i++) yield return null;
 
         var time = Time.time;
-        var request = AsyncGPUReadback.RequestIntoNativeArray(ref buffer, blur.input);
+        var request = AsyncGPUReadback.RequestIntoNativeArray(ref cursor.buffer, blur.input);
         while (true)
         {
             var buttons = (
@@ -114,7 +133,7 @@ public class Test : MonoBehaviour
             var delta = Time.time - time;
             while (deltas.Count >= 100) deltas.Dequeue();
             while (deltas.Count < 100) deltas.Enqueue(1f / delta);
-            if (Input.GetKeyDown(KeyCode.Tab)) mode = (Modes)((int)(mode + 1) % 5);
+            if (Input.GetKeyDown(KeyCode.Tab)) mode = _modes[((int)mode + 1) % _modes.Length];
             Text.text = mode > 0 || Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift) ?
 $@"FPS: {deltas.Average():0.00}
 Mode: {mode}
@@ -123,6 +142,7 @@ Resolution: {size.x} x {size.y}" : "";
             var toColumn = (double)size.x / Music.Beats;
             var cursorBeat = time / 60f * Music.Tempo % Music.Beats;
             var cursorColumn = (int)(cursorBeat * toColumn);
+            cursor.color = Color.HSVToRGB(cursor.hue, cursor.saturation, cursor.value);
 
             Shader.SetInt("Width", size.x);
             Shader.SetInt("Height", size.y);
@@ -130,7 +150,7 @@ Resolution: {size.x} x {size.y}" : "";
             Shader.SetTexture(0, "CameraInput", camera.input);
             Shader.SetTexture(0, "CameraOutput", camera.output);
             Shader.SetInt("CursorColumn", cursorColumn);
-            Shader.SetVector("CursorColor", cursorColor);
+            Shader.SetVector("CursorColor", cursor.color);
             Shader.SetFloat("Time", time);
             Shader.SetFloat("Delta", Delta);
             Shader.SetFloat("Fade", buttons.Item1 ? Fade.y : Fade.x);
@@ -146,10 +166,13 @@ Resolution: {size.x} x {size.y}" : "";
                 Shader.SetTexture(0, "ColorOutput", color.output);
                 Shader.SetTexture(0, "BlurInput", blur.input);
                 Shader.SetTexture(0, "BlurOutput", blur.output);
+                Shader.SetTexture(0, "EmitInput", emit.input);
+                Shader.SetTexture(0, "EmitOutput", emit.output);
                 Shader.Dispatch(0, size.x / 8, size.y / 4, 1);
                 (velocity.input, velocity.output) = (velocity.output, velocity.input);
                 (color.input, color.output) = (color.output, color.input);
                 (blur.input, blur.output) = (blur.output, blur.input);
+                (emit.input, emit.output) = (emit.output, emit.input);
             }
             while (time < Time.time) { time += Delta; Debug.Log($"Skipped a frame."); }
 
@@ -160,88 +183,70 @@ Resolution: {size.x} x {size.y}" : "";
                 Modes.Velocity => velocity.output,
                 Modes.Camera => device,
                 Modes.Blur => blur.output,
+                Modes.Emit => emit.output,
                 _ => default,
             };
 
             if (request.done)
             {
-                var cursorSum = EmitSounds();
-                request = AsyncGPUReadback.RequestIntoNativeArray(ref buffer, blur.input);
-                PlaySounds();
-                Color.RGBToHSV(cursorSum, out var hue, out var saturation, out _);
-                cursorColor = cursorColor.MapHSV(color => (
-                    Mathf.Lerp(color.h, hue, (float)delta * Cursor.Adapt),
-                    Mathf.Lerp(color.s, saturation, (float)delta * Cursor.Adapt),
-                    color.v)).Finite().Clamp(0f, 5f);
+                for (int y = 0; y < size.y; y++) cursor.colors[y] = cursor.buffer[cursorColumn + y * size.x];
+                request = AsyncGPUReadback.RequestIntoNativeArray(ref cursor.buffer, blur.input);
             }
+
+            var sum = cursor.color;
+            var pan = Mathf.Clamp01((float)cursorColumn / size.x) * 2f - 1f;
+            for (int y = 0; y < size.y; y++)
+            {
+                var pixel = cursor.colors[y];
+                sum += pixel;
+                Color.RGBToHSV(pixel, out var hue, out var saturation, out var value);
+
+                var instrument = (int)(hue * clips.Length);
+                var ratio = (float)y / size.y * (saturation * Music.Saturate + 1f - Music.Saturate);
+                var note = Snap((int)Mathf.Lerp(Music.Octaves.x * 12, Music.Octaves.y * 12, ratio), _pentatonic);
+                if (clips.TryAt(instrument, out var notes) && notes.TryAt(note / 12, out var clip))
+                    cursor.sounds[y] = (clip, Mathf.Clamp01(value * Music.Attenuate), Mathf.Pow(2, note % 12 / 12f), pan);
+                else
+                    cursor.sounds[y] = default;
+            }
+            {
+                Color.RGBToHSV(sum, out var hue, out _, out _);
+                cursor.hue = Mathf.Lerp(cursor.hue, hue, delta * Cursor.Adapt);
+            }
+
+            Array.Sort(voices, (left, right) => right.volume.CompareTo(left.volume));
+            for (int i = 0; i < voices.Length && i < Music.Voices; i++)
+                if (voices[i] is AudioSource source && !source.isPlaying) source.Play();
+            for (int i = Music.Voices; i < voices.Length; i++)
+                if (voices[i] is AudioSource source && source.isPlaying) voices[i].Stop();
             yield return null;
+        }
 
-            Color EmitSounds()
+        IEnumerator Sound(int y)
+        {
+            var source = voices[y];
+            while (source)
             {
-                var sum = Cursor.Color;
-                var pan = Mathf.Clamp01((float)cursorColumn / size.x) * 2f - 1f;
-                for (int y = 0; y < size.y; y++)
+                var (clip, volume, pitch, pan) = cursor.sounds[y];
+                if (clip == null) source.volume = Mathf.Lerp(source.volume, 0f, Time.deltaTime * Music.Fade);
+                else if (source.clip == clip)
                 {
-                    var color = buffer[cursorColumn + y * size.x];
-                    sum += color;
-
-                    Color.RGBToHSV(color, out var hue, out var saturation, out var value);
-                    if (value < Music.Threshold) continue;
-
-                    var note = Snap((int)((float)y / size.y * 80f), _pentatonic);
-                    if (clips.TryAt((int)(hue * clips.Length), out var instrument) && instrument.TryAt(note / 12, out var clip))
-                        routines.Add((-value, PlaySound(clip, value * value, Mathf.Pow(2, note % 12 / 12f), pan)));
+                    source.volume = Mathf.Lerp(source.volume, volume, Time.deltaTime * 5f);
+                    source.pitch = Mathf.Lerp(source.pitch, pitch, Time.deltaTime * 5f);
+                    source.panStereo = Mathf.Lerp(source.panStereo, pan, Time.deltaTime * 5f);
                 }
-                return sum;
-            }
-
-            void PlaySounds()
-            {
-                routines.Sort((left, right) => right.key.CompareTo(left.key));
-                for (int i = 0; i < Music.Voices && i < routines.Count; i++)
+                else if (source.volume < 0.1f)
                 {
-                    var index = (int)(Mathf.Pow(Random.value, 2) * routines.Count);
-                    for (int j = index; j < routines.Count; j++)
-                    {
-                        if (routines[j].routine is IEnumerator routine)
-                        {
-                            StartCoroutine(routine);
-                            routines[j] = default;
-                            break;
-                        }
-                    }
+                    source.Stop();
+                    source.name = clip.name;
+                    source.clip = clip;
+                    source.volume = volume * 2.5f;
+                    source.pitch = pitch;
+                    source.panStereo = pan;
+                    source.time = 0f;
                 }
-                routines.Clear();
-            }
-
-            IEnumerator PlaySound(AudioClip clip, float volume, float pitch, float pan)
-            {
-                var source = sources.TryPop(out var value) && value ? value : Instantiate(Music.Source);
-                source.name = clip.name;
-                source.clip = clip;
-                source.volume = volume;
-                source.pitch = pitch;
-                source.panStereo = pan;
-                source.Play();
-
-                for (var counter = 0f; counter < Music.Duration && source.isPlaying; counter += Time.deltaTime)
-                    yield return null;
-
-                for (var counter = 0f; counter < Music.Fade && source.isPlaying; counter += Time.deltaTime)
-                {
-                    source.volume = volume * (1f - Mathf.Clamp01(counter / Music.Fade));
-                    yield return null;
-                }
-
-                source.Stop();
-                sources.Push(source);
-            }
-
-            static int Snap(int note, int[] notes)
-            {
-                var source = note % 12;
-                var target = notes.OrderBy(note => Math.Abs(note - source)).FirstOrDefault();
-                return note - source + target;
+                else source.volume = Mathf.Lerp(source.volume, 0f, Time.deltaTime * Music.Fade);
+                yield return null;
             }
         }
     }

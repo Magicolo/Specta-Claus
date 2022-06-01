@@ -14,6 +14,8 @@ RWTexture2D<float4> ColorOutput;
 
 Texture2D<float4> CameraInput;
 RWTexture2D<float4> CameraOutput;
+Texture2D<float4> EmitInput;
+RWTexture2D<float4> EmitOutput;
 Texture2D<float4> BlurInput;
 RWTexture2D<float4> BlurOutput;
 
@@ -131,24 +133,31 @@ float4 sobel(int2 index, int2 size)
     float x = 0;
     float y = 0;
 
-    x += length(BlurInput[index + int2(-size.x, -size.y)]) * -1.0;
-    x += length(BlurInput[index + int2(-size.x, 0)]) * -2.0;
-    x += length(BlurInput[index + int2(-size.x, size.y)]) * -1.0;
+    x += length(BlurInput[wrap2(index + int2(-size.x, -size.y), uint2(Width, Height))]) * -1.0;
+    x += length(BlurInput[wrap2(index + int2(-size.x, 0), uint2(Width, Height))]) * -2.0;
+    x += length(BlurInput[wrap2(index + int2(-size.x, size.y), uint2(Width, Height))]) * -1.0;
 
-    x += length(BlurInput[index + int2(size.x, -size.y)]) * 1.0;
-    x += length(BlurInput[index + int2(size.x, 0)]) * 2.0;
-    x += length(BlurInput[index + int2(size.x, size.y)]) * 1.0;
+    x += length(BlurInput[wrap2(index + int2(size.x, -size.y), uint2(Width, Height))]) * 1.0;
+    x += length(BlurInput[wrap2(index + int2(size.x, 0), uint2(Width, Height))]) * 2.0;
+    x += length(BlurInput[wrap2(index + int2(size.x, size.y), uint2(Width, Height))]) * 1.0;
 
-    y += length(BlurInput[index + int2(-size.x, -size.y)]) * -1.0;
-    y += length(BlurInput[index + int2(0, -size.y)]) * -2.0;
-    y += length(BlurInput[index + int2(size.x, -size.y)]) * -1.0;
+    y += length(BlurInput[wrap2(index + int2(-size.x, -size.y), uint2(Width, Height))]) * -1.0;
+    y += length(BlurInput[wrap2(index + int2(0, -size.y), uint2(Width, Height))]) * -2.0;
+    y += length(BlurInput[wrap2(index + int2(size.x, -size.y), uint2(Width, Height))]) * -1.0;
 
-    y += length(BlurInput[index + int2(-size.x, size.y)]) * 1.0;
-    y += length(BlurInput[index + int2(0, size.y)]) * 2.0;
-    y += length(BlurInput[index + int2(size.x, size.y)]) * 1.0;
+    y += length(BlurInput[wrap2(index + int2(-size.x, size.y), uint2(Width, Height))]) * 1.0;
+    y += length(BlurInput[wrap2(index + int2(0, size.y), uint2(Width, Height))]) * 2.0;
+    y += length(BlurInput[wrap2(index + int2(size.x, size.y), uint2(Width, Height))]) * 1.0;
 
     float value = clamp(sqrt(x * x + y * y), 0.0, 1.0);
     return float4(value, value, value, 1);
+}
+
+float4 shift(float4 color, float hue, float saturation, float value)
+{
+    const float3 hsv = rgb2hsv(color.xyz);
+    const float3 rgb = hsv2rgb(float3(hsv.x + hue, hsv.y + saturation, hsv.z + value));
+    return float4(rgb, color.w);
 }
 
 float4 colorize(float4 color, float amount)
@@ -186,14 +195,15 @@ void Update(uint3 id : SV_DispatchThreadID)
     const float CameraJitter = 10;
     const float CameraThreshold = 0.5;
     const float CameraContrast = 2.5;
+    const float CameraColorize = 2.5;
 
     const float ParticleFriction = 15;
     const float ParticleFade = 15;
     const float ParticleTrail = 25;
     const float ParticleColorize = 2.5;
 
-    const float CursorTrail = 25;
-    const float CursorFade = 10;
+    const float CursorTrail = 100;
+    const float CursorFade = 25;
     const float CursorBlend = 0;
 
     const int2 EmitRadius = int2(2, 5);
@@ -204,7 +214,12 @@ void Update(uint3 id : SV_DispatchThreadID)
     const float EmitColorize = 10;
 
     const float BlurInside = 0.25;
-    const float BlurOutline = 1;
+    const float BlurOutline = 2.5;
+    const float2 BlurSobel = float2(0, 1);
+    const float BlurJitter = 2.5;
+
+    const int EdgeSize = 1;
+    const float EdgeThreshold = 0.1;
 
     const float4 color = ColorInput[id.xy];
     const float4 velocity = VelocityInput[id.xy];
@@ -272,22 +287,59 @@ void Update(uint3 id : SV_DispatchThreadID)
     const float4 cursorColor = cursorFade * CursorColor;
 
 
+    float4 cameraInput = CameraInput[id.xy];
+    cameraInput = pow(abs(cameraInput), CameraContrast);
+    cameraInput = colorize(cameraInput, CameraColorize);
+    const bool cameraValid = any(cameraInput.xyz >= float3(CameraThreshold, CameraThreshold, CameraThreshold));
+    cameraInput *= cameraValid;
+    const float cameraJitter = clamp(CameraJitter * Delta, 0.0, 1.0);
+    const float4 cameraOutput = lerp(CameraOutput[id.xy], cameraInput, cameraJitter);
+
+
+    const uint edgePixels = pow(EdgeSize * 2 + 1, 2);
+    uint edges = 0;
+    for (int x = -EdgeSize; x <= EdgeSize; x++)
+    {
+        for (int y = -EdgeSize; y <= EdgeSize; y++)
+        {
+            const int2 index = wrap2(id.xy + int2(x, y), uint2(Width, Height));
+            edges += any(BlurInput[index].rgb > float3(EdgeThreshold, EdgeThreshold, EdgeThreshold));
+        }
+    }
+
+
+    const float blurFade = 1.0 - Delta * Fade;
+    const float4 blurInput = BlurInput[id.xy];
+    const float4 blurOutput = blurInput * blurFade + cameraOutput * clamp(10.0 - length(blurInput), 0.0, 1.0);
+    const float4 blurInside = blurOutput * BlurInside;
+    const float4 blurOutline = blurOutput * (sin(Time * 6.28) + 2) * (edges < edgePixels) * BlurOutline;
+    const float3 blurHSV = rgb2hsv(blurOutput.rgb);
+    float4 blurSobel =
+        blurOutput * sobel(id.xy, int2(sin(Time * 0.93) * 3 + 4, sin(Time * 1.31) * 7 + 8)) * 0.4 +
+        blurOutput * sobel(id.xy, int2(sin(Time * 0.53) * 9 + 10, sin(Time * 0.71) * 19 + 20)) * 0.3 +
+        blurOutput * sobel(id.xy, int2(sin(Time * 0.37) * 21 + 25, sin(Time * 1.21) * 11 + 9))  * 0.2 +
+        blurOutput * sobel(id.xy, int2(sin(Time * 0.87) * 29 + 31, sin(Time * 0.29) * 37 + 40)) * 0.1;
+    // blurSobel *= lerp(BlurSobel.x, BlurSobel.y, clamp(blurHSV.y - blurHSV.z, 0, 1));
+    blurSobel *= lerp(BlurSobel.y, BlurSobel.x, pow(blurHSV.y, 2));
+    const float4 blurColor = lerp(EmitInput[id.xy], blurInside + blurOutline + blurSobel, Delta * (BlurJitter + Fade));
+
+
     float2 emitVelocity = float2(0, 0);
     float4 emitColor = float4(0, 0, 0, 0);
     for (int y = -EmitRadius.y; y <= EmitRadius.y; y++) {
         const int2 target = int2(CursorColumn, int(id.y) + y);
-        const float4 blur = BlurInput[target];
-        const float power = pow(clamp(max(max(blur.x, blur.y), blur.z) * 0.25, 0.0, 1.0), EmitPower);
+        const float4 input = EmitInput[target];
+        const float power = pow(clamp(max(max(input.x, input.y), input.z) * 0.25, 0.0, 1.0), EmitPower);
         const float distance = length(float2(target) - float2(id.xy));
         const float radius = lerp(float(EmitRadius.x), float(EmitRadius.y), power);
         const float fade = 1.0 - clamp(distance / radius, 0.0, 1.0);
-        const float4 color = lerp(blur, CursorColor, CursorBlend) * fade;
+        const float4 color = lerp(input, CursorColor, CursorBlend) * fade;
         const float2 random = seed = random2(target * seed);
         const float force = lerp(EmitForce.x, EmitForce.y, power);
         const float forward = lerp(EmitForward.x, EmitForward.y, power);
         const float2 velocity = float2(lerp(-force, force * forward, random.x), lerp(-force, force, random.y));
-        emitVelocity += velocity * any(blur) * any(color);
-        emitColor += color * any(blur);
+        emitVelocity += velocity * any(input) * any(color);
+        emitColor += color * any(input);
     }
     const float4 emitPolarize = polarize4(emitColor, float4(EmitPolarize, EmitPolarize, EmitPolarize, 0));
     const float4 emitColorize = colorize(emitPolarize, EmitColorize);
@@ -295,25 +347,10 @@ void Update(uint3 id : SV_DispatchThreadID)
     emitColor = emitBehind * emitColorize;
 
 
-    float4 cameraColor = CameraInput[id.xy];
-    cameraColor = pow(abs(cameraColor), CameraContrast);
-    cameraColor = colorize(cameraColor, 5);
-    const bool cameraValid = any(cameraColor.xyz >= float3(CameraThreshold, CameraThreshold, CameraThreshold));
-    cameraColor *= cameraValid;
-    const float cameraJitter = clamp(CameraJitter * Delta, 0.0, 1.0);
-    cameraColor = lerp(CameraOutput[id.xy], cameraColor, cameraJitter);
-
-
-    const float blurFade = 1.0 - Delta * Fade;
-    const float4 blurInput = BlurInput[id.xy];
-    const float4 blurColor = blurInput * blurFade + cameraColor * clamp(10.0 - length(blurInput), 0.0, 1.0);
-    const float4 blurInside = blurColor * BlurInside;
-    const float4 blurOutline = blurColor * sobel(id.xy, int2(1, 1)) * BlurOutline;
-
-
     VelocityOutput[id.xy] = fix4(float4(particleVelocity + emitVelocity, particleResidual));
     ColorOutput[id.xy] = fix4(particleColor + emitColor);
-    BlurOutput[id.xy] = fix4(blurColor);
-    CameraOutput[id.xy] = fix4(cameraColor);
-    Output[id.xy] = fix4(clamp(particleColor + emitColor + cursorColor + blurInside + blurOutline, 0, 100));
+    EmitOutput[id.xy] = fix4(blurColor);
+    BlurOutput[id.xy] = fix4(blurOutput);
+    CameraOutput[id.xy] = fix4(cameraOutput);
+    Output[id.xy] = fix4(clamp(particleColor + emitColor + cursorColor + blurColor, 0, 100));
 }

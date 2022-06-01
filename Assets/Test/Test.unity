@@ -149,7 +149,8 @@ AudioSource:
   m_GameObject: {fileID: 209802}
   m_Enabled: 1
   serializedVersion: 4
-  OutputAudioMixerGroup: {fileID: 0}
+  OutputAudioMixerGroup: {fileID: 24300002, guid: 1c338cf025077c344b79608670f1a7b0,
+    type: 2}
   m_audioClip: {fileID: 0}
   m_PlayOnAwake: 0
   m_Volume: 1
@@ -472,11 +473,11 @@ MonoBehaviour:
   Music:
     Tempo: 120
     Beats: 16
-    Voices: 8
-    Threshold: 0.1
-    Duration: 0.5
-    Fade: 0.1
-    Octaves: {x: 4, y: 8}
+    Voices: 256
+    Saturate: 0.25
+    Fade: 1
+    Attenuate: 0.25
+    Octaves: {x: 3, y: 7}
     Source: {fileID: 209803}
     Clips:
     - {fileID: 8300000, guid: 73fad2e5e513cc84e8793a72f47cb8bd, type: 3}
@@ -536,8 +537,8 @@ MonoBehaviour:
     - {fileID: 8300000, guid: c9795e5b2826e344882619414a31d5b8, type: 3}
     - {fileID: 8300000, guid: cd8876d4dab590d4b8108c40d4b7a800, type: 3}
   Cursor:
-    Color: {r: 5.992157, g: 2.509804, b: 0, a: 1}
-    Adapt: 5
+    Color: {r: 23.968628, g: 10.039216, b: 0, a: 1}
+    Adapt: 1
   Text: {fileID: 1725860455}
 --- !u!4 &1401311511
 Transform:

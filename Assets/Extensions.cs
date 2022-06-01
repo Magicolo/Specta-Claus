@@ -82,10 +82,14 @@ public static class Extensions
 
     public static ref T Swap<T>(ref this T source, ref T target) where T : struct
     {
-        var temporary = source;
-        source = target;
-        target = temporary;
+        (target, source) = (source, target);
         return ref target;
+    }
+
+    public static T Set<T>(ref this T source, T target) where T : struct
+    {
+        (target, source) = (source, target);
+        return target;
     }
 
     public static bool Change(ref this bool source, bool target)
@@ -483,5 +487,34 @@ public static class Extensions
             item = default;
             return false;
         }
+    }
+
+    public static bool TryFirst<T>(this IReadOnlyList<T> list, out T item) => list.TryAt(0, out item);
+    public static bool TryLast<T>(this IReadOnlyList<T> list, out T item) => list.TryAt(list.Count - 1, out item);
+
+    public static bool TryPop<T>(this IList<T> list, out T item)
+    {
+        if (list.Count > 0)
+        {
+            item = list[list.Count - 1];
+            list.RemoveAt(list.Count - 1);
+            return true;
+        }
+        else
+        {
+            item = default;
+            return false;
+        }
+    }
+
+    public static bool TryFind<T>(this IReadOnlyList<T> list, Func<T, bool> predicate, out T item)
+    {
+        for (int i = 0; i < list.Count; i++)
+        {
+            item = list[i];
+            if (predicate(item)) return true;
+        }
+        item = default;
+        return false;
     }
 }
