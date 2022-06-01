@@ -461,8 +461,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   Delta: 0.01
-  Fade: {x: 0.025, y: 100}
-  Explode: 1
+  Fade: {x: 0.1, y: 100}
+  Explode: 100
+  ExplodeDelay: 0.1
   Shader: {fileID: 7200000, guid: 1c1076680226c5241a490f2dc24c189e, type: 3}
   Material: {fileID: 2100000, guid: 30f5a7556c9922b469ea9d131a7d2f04, type: 2}
   Camera:

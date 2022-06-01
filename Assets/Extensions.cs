@@ -267,6 +267,13 @@ public static class Extensions
         return value;
     }
 
+    public static T? Take<T>(ref this T? source) where T : struct
+    {
+        var value = source;
+        source = default;
+        return value;
+    }
+
     public static int Wrap(this int value, int bound) => (value < 0 ? (bound + value % bound) : value) % bound;
     public static long Wrap(this long value, long bound) => (value < 0 ? (bound + value % bound) : value) % bound;
     public static float Wrap(this float value, float bound) => (value < 0 ? (bound + value % bound) : value) % bound;

@@ -5,7 +5,7 @@ float Time;
 uint Width;
 uint Height;
 float4 Seed;
-float Fade;
+bool Clear;
 float Explode;
 Texture2D<float4> VelocityInput;
 RWTexture2D<float4> VelocityOutput;
@@ -190,16 +190,15 @@ Neighboor neighboor(uint2 index, int2 direction)
 [numthreads(8,4,1)]
 void Update(uint3 id : SV_DispatchThreadID)
 {
-    // TODO: Explode!
     const float CameraJitter = 10;
     const float CameraThreshold = 0.5;
     const float CameraContrast = 2.5;
     const float CameraColorize = 2.5;
 
-    const float ParticleFriction = 15;
-    const float ParticleFade = 15;
-    const float ParticleTrail = 25;
-    const float ParticleColorize = 2.5;
+    const float ParticleFriction = 15 / (Explode + 1);
+    const float ParticleFade = 15 / (Explode + 1);
+    const float ParticleTrail = 25 * (Explode + 1);
+    const float ParticleColorize = 2.5 * (Explode + 1);
 
     const float CursorTrail = 100;
     const float CursorFade = 25;
@@ -212,6 +211,7 @@ void Update(uint3 id : SV_DispatchThreadID)
     const float EmitPolarize = 0.75;
     const float EmitColorize = 10;
 
+    const float BlurFade = 0.1;
     const float BlurInside = 0.25;
     const float BlurOutline = 2.5;
     const float BlurSobel = 5;
@@ -309,7 +309,7 @@ void Update(uint3 id : SV_DispatchThreadID)
     }
 
 
-    const float blurFade = 1.0 - Delta * Fade;
+    const float blurFade = 1.0 - Delta * BlurFade;
     const float4 blurInput = BlurInput[id.xy];
     const float4 blurOutput = blurInput * blurFade + cameraOutput * clamp(10.0 - length(blurInput), 0.0, 1.0);
     const float4 blurOutline = blurOutput * (sin(Time * EdgeSpeed) * EdgeShine * 0.5 + EdgeShine) * (edges < edgePixels) * BlurOutline;
@@ -319,7 +319,7 @@ void Update(uint3 id : SV_DispatchThreadID)
         blurOutput * sobel(id.xy, int2(sin(Time * 0.37) * 5 + 7, sin(Time * 1.21) * 6 + 8)) * 0.2 * BlurSobel +
         blurOutput * sobel(id.xy, int2(sin(Time * 1.87) * 7 + 10, sin(Time * 1.29) * 8 + 11)) * 0.1 * BlurSobel;
     const float4 blurInside = lerp(blurOutput * BlurInside, blurSobel / BlurSobel, pow(length(blurSobel.rgb), 0.25));
-    const float4 blurColor = lerp(EmitInput[id.xy], blurInside + blurOutline, Delta * (BlurJitter + Fade));
+    const float4 blurColor = lerp(EmitInput[id.xy], blurInside + blurOutline, Delta * BlurJitter);
 
 
     float2 emitVelocity = float2(0, 0);
@@ -341,14 +341,19 @@ void Update(uint3 id : SV_DispatchThreadID)
     }
     const float4 emitPolarize = polarize4(emitColor, float4(EmitPolarize, EmitPolarize, EmitPolarize, 0));
     const float4 emitColorize = colorize(emitPolarize, EmitColorize);
-    const float emitBehind = clamp(cursorBehind + Explode, 0.0, 1.0);
+    const float emitBehind = clamp(cursorBehind, 0.0, 1.0);
     emitColor = emitBehind * emitColorize;
 
 
-    VelocityOutput[id.xy] = fix4(float4(particleVelocity + emitVelocity, particleResidual));
-    ColorOutput[id.xy] = fix4(particleColor + emitColor);
-    EmitOutput[id.xy] = fix4(blurColor);
-    BlurOutput[id.xy] = fix4(blurOutput);
-    CameraOutput[id.xy] = fix4(cameraOutput);
+    const float2 explodeVelocity = (seed = random2(id.xy) * 2.0 - float2(1, 1)) * float2(Explode, Explode) * 1000;
+    const float4 explodeInput = particleColor + cursorColor + blurColor;
+    const float4 explodeColor = shift(normalize(explodeInput), 0.1, 0, 0) * any(explodeInput > float4(0.1, 0.1, 0.1, 0.1)) * any(Explode);
+
+
+    VelocityOutput[id.xy] = fix4(float4(particleVelocity + emitVelocity + explodeVelocity, particleResidual)) * !Clear;
+    ColorOutput[id.xy] = fix4(particleColor + emitColor + explodeColor) * !Clear;
+    EmitOutput[id.xy] = fix4(blurColor + explodeColor) * !Clear;
+    BlurOutput[id.xy] = fix4(blurOutput + explodeColor) * !Clear;
+    CameraOutput[id.xy] = fix4(cameraOutput + explodeColor) * !Clear;
     Output[id.xy] = fix4(clamp(particleColor + emitColor + cursorColor + blurColor, 0, 100));
 }

@@ -68,7 +68,6 @@ public class Test : MonoBehaviour
 
     [Range(0f, 1f)]
     public float Delta = 0.01f;
-    public Vector2 Fade = new(0.1f, 10f);
     public float Explode = 1f;
     public ComputeShader Shader;
     public Material Material;
@@ -76,6 +75,8 @@ public class Test : MonoBehaviour
     public MusicSettings Music = new();
     public CursorSettings Cursor = new();
     public TMP_Text Text;
+
+    (bool, bool, bool, bool, bool tab, bool shift, bool space) _buttons;
 
     IEnumerator Start()
     {
@@ -116,27 +117,27 @@ public class Test : MonoBehaviour
             buffer: new NativeArray<Color>(size.x * size.y, Allocator.Persistent));
         Color.RGBToHSV(Cursor.Color, out cursor.hue, out cursor.saturation, out cursor.value);
 
-        for (int y = 0; y < size.y; y++) StartCoroutine(Sound(y));
-
-        // Wait until fps has stabilized.
-        for (int i = 0; i < 10; i++) yield return null;
-
         var time = Time.time;
         var request = AsyncGPUReadback.RequestIntoNativeArray(ref cursor.buffer, blur.input);
+        var explode = false;
+        var next = float.MaxValue;
+        for (int y = 0; y < size.y; y++) StartCoroutine(Sound(y));
+
         while (true)
         {
             yield return null;
 
-            var buttons = (
-                Input.GetKey(KeyCode.Alpha1) || Input.GetKey(KeyCode.Keypad1),
-                Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2),
-                Input.GetKey(KeyCode.Alpha3) || Input.GetKey(KeyCode.Keypad3),
-                Input.GetKey(KeyCode.Alpha4) || Input.GetKey(KeyCode.Keypad4));
             var delta = Time.time - time;
             while (delta > 0 && deltas.Count >= 100) deltas.Dequeue();
             while (delta > 0 && deltas.Count < 100) deltas.Enqueue(1f / delta);
-            if (Input.GetKeyDown(KeyCode.Tab)) mode = _modes[((int)mode + 1) % _modes.Length];
-            Text.text = mode > 0 || Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift) ?
+            if (_buttons.tab.Take()) mode = _modes[((int)mode + 1) % _modes.Length];
+
+            var clear = _buttons.Item1.Take();
+            if (_buttons.Item2.Take()) { explode = true; next = time + 0.1f; }
+            else if (next < time) { explode = true; next = float.MaxValue; }
+            else explode = false;
+
+            Text.text = _buttons.shift.Take() || mode > 0 ?
 $@"FPS: {deltas.Average():0.00}
 Mode: {mode}
 Resolution: {size.x} x {size.y}" : "";
@@ -155,8 +156,8 @@ Resolution: {size.x} x {size.y}" : "";
             Shader.SetVector("CursorColor", cursor.color);
             Shader.SetFloat("Time", time);
             Shader.SetFloat("Delta", Delta);
-            Shader.SetFloat("Fade", buttons.Item1 ? Fade.y : Fade.x);
-            Shader.SetFloat("Explode", buttons.Item2 ? Explode : 0f);
+            Shader.SetBool("Clear", clear);
+            Shader.SetFloat("Explode", explode ? Explode : 0f);
 
             for (int step = 0; step < 10 && time < Time.time && Delta > 0f; step++, time += Delta)
             {
@@ -176,9 +177,9 @@ Resolution: {size.x} x {size.y}" : "";
                 (blur.input, blur.output) = (blur.output, blur.input);
                 (emit.input, emit.output) = (emit.output, emit.input);
             }
-            while (time < Time.time) { time += Delta; Debug.Log($"Skipped a frame."); }
+            while (time < Time.time) time += Delta;
 
-            Material.mainTexture = Input.GetKey(KeyCode.Space) ? output : mode switch
+            Material.mainTexture = _buttons.space.Take() ? output : mode switch
             {
                 Modes.None => output,
                 Modes.Color => color.output,
@@ -206,10 +207,13 @@ Resolution: {size.x} x {size.y}" : "";
                 var instrument = (int)(hue * clips.Length);
                 var ratio = (float)y / size.y * (saturation * Music.Saturate + 1f - Music.Saturate);
                 var note = Snap((int)Mathf.Lerp(Music.Octaves.x * 12, Music.Octaves.y * 12, ratio), _pentatonic);
-                if (clips.TryAt(instrument, out var notes) && notes.TryAt(note / 12, out var clip))
+
+                if (clear)
+                    cursor.sounds[y].pitch = 0f;
+                else if (explode)
+                    cursor.sounds[y] = (Music.Clips[random.Next(Music.Clips.Length)], random.NextFloat(), random.NextFloat(0.5f, 2f), random.NextFloat(-1f, 1f));
+                else if (value > 0.1f && clips.TryAt(instrument, out var notes) && notes.TryAt(note / 12, out var clip))
                     cursor.sounds[y] = (clip, Mathf.Clamp01(value * Music.Attenuate), Mathf.Pow(2, note % 12 / 12f), pan);
-                else
-                    cursor.sounds[y] = default;
             }
             {
                 Color.RGBToHSV(sum, out var hue, out _, out _);
@@ -228,14 +232,11 @@ Resolution: {size.x} x {size.y}" : "";
             var source = voices[y];
             while (source)
             {
+                if (explode && next < float.MaxValue) source.Stop();
                 var (clip, volume, pitch, pan) = cursor.sounds[y];
-                if (clip == null) source.volume = Mathf.Lerp(source.volume, 0f, Time.deltaTime * Music.Fade);
-                else if (source.clip == clip)
-                {
-                    source.volume = Mathf.Lerp(source.volume, volume, Time.deltaTime * 5f);
-                    source.pitch = Mathf.Lerp(source.pitch, pitch, Time.deltaTime * 5f);
-                    source.panStereo = Mathf.Lerp(source.panStereo, pan, Time.deltaTime * 5f);
-                }
+
+                if (clip == null) Interpolate(source, 0f, pitch, pan, Music.Fade);
+                else if (source.clip == clip) Interpolate(source, volume, pitch, pan, Music.Fade);
                 else if (source.volume < 0.1f)
                 {
                     source.Stop();
@@ -246,9 +247,27 @@ Resolution: {size.x} x {size.y}" : "";
                     source.panStereo = pan;
                     source.time = 0f;
                 }
-                else source.volume = Mathf.Lerp(source.volume, 0f, Time.deltaTime * Music.Fade);
+                else Interpolate(source, 0f, pitch, pan, Music.Fade);
                 yield return null;
             }
+
+            static void Interpolate(AudioSource source, float volume, float pitch, float pan, float fade)
+            {
+                source.volume = Mathf.Lerp(source.volume, volume, Time.deltaTime * fade);
+                source.pitch = Mathf.Lerp(source.pitch, pitch, Time.deltaTime * 5f);
+                source.panStereo = Mathf.Lerp(source.panStereo, pan, Time.deltaTime * 5f);
+            }
         }
+    }
+
+    void Update()
+    {
+        _buttons.Item1 |= Input.GetKey(KeyCode.Alpha1) || Input.GetKey(KeyCode.Keypad1);
+        _buttons.Item2 |= Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2);
+        _buttons.Item3 |= Input.GetKey(KeyCode.Alpha3) || Input.GetKey(KeyCode.Keypad3);
+        _buttons.Item4 |= Input.GetKey(KeyCode.Alpha4) || Input.GetKey(KeyCode.Keypad4);
+        _buttons.tab |= Input.GetKeyDown(KeyCode.Tab);
+        _buttons.shift |= Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+        _buttons.space |= Input.GetKey(KeyCode.Space);
     }
 }
