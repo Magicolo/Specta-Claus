@@ -125,14 +125,16 @@ public class Test : MonoBehaviour
         var request = AsyncGPUReadback.RequestIntoNativeArray(ref cursor.buffer, blur.input);
         while (true)
         {
+            yield return null;
+
             var buttons = (
                 Input.GetKey(KeyCode.Alpha1) || Input.GetKey(KeyCode.Keypad1),
                 Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2),
                 Input.GetKey(KeyCode.Alpha3) || Input.GetKey(KeyCode.Keypad3),
                 Input.GetKey(KeyCode.Alpha4) || Input.GetKey(KeyCode.Keypad4));
             var delta = Time.time - time;
-            while (deltas.Count >= 100) deltas.Dequeue();
-            while (deltas.Count < 100) deltas.Enqueue(1f / delta);
+            while (delta > 0 && deltas.Count >= 100) deltas.Dequeue();
+            while (delta > 0 && deltas.Count < 100) deltas.Enqueue(1f / delta);
             if (Input.GetKeyDown(KeyCode.Tab)) mode = _modes[((int)mode + 1) % _modes.Length];
             Text.text = mode > 0 || Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift) ?
 $@"FPS: {deltas.Average():0.00}
@@ -219,7 +221,6 @@ Resolution: {size.x} x {size.y}" : "";
                 if (voices[i] is AudioSource source && !source.isPlaying) source.Play();
             for (int i = Music.Voices; i < voices.Length; i++)
                 if (voices[i] is AudioSource source && source.isPlaying) voices[i].Stop();
-            yield return null;
         }
 
         IEnumerator Sound(int y)
