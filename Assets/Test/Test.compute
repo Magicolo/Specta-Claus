@@ -288,7 +288,8 @@ void Update(uint3 id : SV_DispatchThreadID)
     const float4 cursorColor = cursorFade * CursorColor;
 
 
-    float4 cameraInput = CameraInput[id.xy];
+    float4 cameraInput = CameraInput[uint2(Width - id.x - 1, id.y)];
+    // float4 cameraInput = CameraInput[id.xy];
     cameraInput = pow(abs(cameraInput), CameraContrast);
     cameraInput = colorize(cameraInput, CameraColorize);
     const bool cameraValid = any(cameraInput.xyz >= float3(CameraThreshold, CameraThreshold, CameraThreshold));

@@ -7,6 +7,7 @@ using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using UnityEngine.UI;
 using Random = UnityEngine.Random;
 
 public class Test : MonoBehaviour
@@ -18,6 +19,9 @@ public class Test : MonoBehaviour
         public int Y = 128;
         public int Rate = 30;
         public int Device = 0;
+        public Image Output;
+        public Image Flash;
+        public AudioSource Clear;
     }
 
     [Serializable]
@@ -70,13 +74,12 @@ public class Test : MonoBehaviour
     public float Delta = 0.01f;
     public float Explode = 1f;
     public ComputeShader Shader;
-    public Material Material;
     public CameraSettings Camera = new();
     public MusicSettings Music = new();
     public CursorSettings Cursor = new();
     public TMP_Text Text;
 
-    (bool, bool, bool, bool, bool tab, bool shift, bool space) _buttons;
+    (bool, bool, bool, bool, bool tab, bool shift, bool space, bool left, bool right, bool up, bool down) _buttons;
 
     IEnumerator Start()
     {
@@ -112,6 +115,7 @@ public class Test : MonoBehaviour
         var output = Texture(size);
         var voices = Enumerable.Range(0, size.y).Select(_ => Instantiate(Music.Source)).ToArray();
         var cursor = (color: Cursor.Color, hue: 0f, saturation: 0f, value: 0f,
+            output: Texture(size),
             sounds: new (AudioClip clip, float volume, float pitch, float pan)[size.y],
             colors: new Color[size.y],
             buffer: new NativeArray<Color>(size.x * size.y, Allocator.Persistent));
@@ -133,6 +137,18 @@ public class Test : MonoBehaviour
             if (_buttons.tab.Take()) mode = _modes[((int)mode + 1) % _modes.Length];
 
             var clear = _buttons.Item1.Take();
+            if (clear)
+            {
+                Camera.Clear.Play();
+                Camera.Clear.volume = 1f;
+                Camera.Flash.color = Camera.Flash.color.With(a: 1f);
+            }
+            else
+            {
+                Camera.Clear.volume = Mathf.Clamp01(1f - Camera.Clear.time);
+                Camera.Flash.color = Color.Lerp(Camera.Flash.color, Camera.Flash.color.With(a: 0f), Time.deltaTime * 5f);
+            }
+
             if (_buttons.Item2.Take()) { explode = true; next = time + 0.1f; }
             else if (next < time) { explode = true; next = float.MaxValue; }
             else explode = false;
@@ -179,7 +195,7 @@ Resolution: {size.x} x {size.y}" : "";
             }
             while (time < Time.time) time += Delta;
 
-            Material.mainTexture = _buttons.space.Take() ? output : mode switch
+            Camera.Output.material.mainTexture = _buttons.space.Take() ? output : mode switch
             {
                 Modes.None => output,
                 Modes.Color => color.output,
@@ -209,11 +225,16 @@ Resolution: {size.x} x {size.y}" : "";
                 var note = Snap((int)Mathf.Lerp(Music.Octaves.x * 12, Music.Octaves.y * 12, ratio), _pentatonic);
 
                 if (clear)
-                    cursor.sounds[y] = default;
+                    cursor.sounds[y].pitch = 0f;
                 else if (explode)
                     cursor.sounds[y] = (Music.Clips[random.Next(Music.Clips.Length)], random.NextFloat(), random.NextFloat(0.5f, 2f), random.NextFloat(-1f, 1f));
-                else if (value > 0.1f && clips.TryAt(instrument, out var notes) && notes.TryAt(note / 12, out var clip))
+                else if (value > 0f && clips.TryAt(instrument, out var notes) && notes.TryAt(note / 12, out var clip))
                     cursor.sounds[y] = (clip, Mathf.Clamp01(value * Music.Attenuate), Mathf.Pow(2, note % 12 / 12f), pan);
+                else
+                {
+                    cursor.sounds[y].volume = 0f;
+                    cursor.sounds[y].clip = default;
+                }
             }
             {
                 Color.RGBToHSV(sum, out var hue, out _, out _);
@@ -224,38 +245,36 @@ Resolution: {size.x} x {size.y}" : "";
             for (int i = 0; i < voices.Length && i < Music.Voices; i++)
                 if (voices[i] is AudioSource source && !source.isPlaying) source.Play();
             for (int i = Music.Voices; i < voices.Length; i++)
-                if (voices[i] is AudioSource source && source.isPlaying) voices[i].Stop();
+                if (voices[i] is AudioSource source && source.isPlaying) source.Stop();
         }
 
         IEnumerator Sound(int y)
         {
             var source = voices[y];
+            var last = default(AudioClip);
             while (source)
             {
                 if (explode && next < float.MaxValue) source.Stop();
                 var (clip, volume, pitch, pan) = cursor.sounds[y];
 
-                if (clip == null) Interpolate(source, 0f, pitch, pan);
-                else if (source.clip == clip) Interpolate(source, volume, pitch, pan);
-                else if (source.volume < 0.1f)
+                if (clip == null || last == clip)
+                {
+                    source.volume = Mathf.Lerp(source.volume, volume, Time.deltaTime * Music.Fade);
+                    source.pitch = Mathf.Lerp(source.pitch, pitch, Time.deltaTime * 5f);
+                    source.panStereo = Mathf.Lerp(source.panStereo, pan, Time.deltaTime * 5f);
+                }
+                else
                 {
                     source.Stop();
                     source.name = clip.name;
                     source.clip = clip;
-                    source.volume = volume * 2.5f;
+                    source.volume = volume;
                     source.pitch = pitch;
                     source.panStereo = pan;
                     source.time = 0f;
                 }
-                else Interpolate(source, 0f, pitch, pan);
+                last = clip;
                 yield return null;
-            }
-
-            void Interpolate(AudioSource source, float volume, float pitch, float pan)
-            {
-                source.volume = Mathf.Lerp(source.volume, volume, Time.deltaTime * Music.Fade);
-                source.pitch = Mathf.Lerp(source.pitch, pitch, Time.deltaTime * 5f);
-                source.panStereo = Mathf.Lerp(source.panStereo, pan, Time.deltaTime * 5f);
             }
         }
     }
@@ -266,6 +285,10 @@ Resolution: {size.x} x {size.y}" : "";
         _buttons.Item2 |= Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2);
         _buttons.Item3 |= Input.GetKey(KeyCode.Alpha3) || Input.GetKey(KeyCode.Keypad3);
         _buttons.Item4 |= Input.GetKey(KeyCode.Alpha4) || Input.GetKey(KeyCode.Keypad4);
+        _buttons.left |= Input.GetKeyDown(KeyCode.LeftArrow);
+        _buttons.right |= Input.GetKeyDown(KeyCode.RightArrow);
+        _buttons.up |= Input.GetKeyDown(KeyCode.UpArrow);
+        _buttons.down |= Input.GetKeyDown(KeyCode.DownArrow);
         _buttons.tab |= Input.GetKeyDown(KeyCode.Tab);
         _buttons.shift |= Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
         _buttons.space |= Input.GetKey(KeyCode.Space);
