@@ -209,7 +209,7 @@ Resolution: {size.x} x {size.y}" : "";
                 var note = Snap((int)Mathf.Lerp(Music.Octaves.x * 12, Music.Octaves.y * 12, ratio), _pentatonic);
 
                 if (clear)
-                    cursor.sounds[y].pitch = 0f;
+                    cursor.sounds[y] = default;
                 else if (explode)
                     cursor.sounds[y] = (Music.Clips[random.Next(Music.Clips.Length)], random.NextFloat(), random.NextFloat(0.5f, 2f), random.NextFloat(-1f, 1f));
                 else if (value > 0.1f && clips.TryAt(instrument, out var notes) && notes.TryAt(note / 12, out var clip))
@@ -235,8 +235,8 @@ Resolution: {size.x} x {size.y}" : "";
                 if (explode && next < float.MaxValue) source.Stop();
                 var (clip, volume, pitch, pan) = cursor.sounds[y];
 
-                if (clip == null) Interpolate(source, 0f, pitch, pan, Music.Fade);
-                else if (source.clip == clip) Interpolate(source, volume, pitch, pan, Music.Fade);
+                if (clip == null) Interpolate(source, 0f, pitch, pan);
+                else if (source.clip == clip) Interpolate(source, volume, pitch, pan);
                 else if (source.volume < 0.1f)
                 {
                     source.Stop();
@@ -247,13 +247,13 @@ Resolution: {size.x} x {size.y}" : "";
                     source.panStereo = pan;
                     source.time = 0f;
                 }
-                else Interpolate(source, 0f, pitch, pan, Music.Fade);
+                else Interpolate(source, 0f, pitch, pan);
                 yield return null;
             }
 
-            static void Interpolate(AudioSource source, float volume, float pitch, float pan, float fade)
+            void Interpolate(AudioSource source, float volume, float pitch, float pan)
             {
-                source.volume = Mathf.Lerp(source.volume, volume, Time.deltaTime * fade);
+                source.volume = Mathf.Lerp(source.volume, volume, Time.deltaTime * Music.Fade);
                 source.pitch = Mathf.Lerp(source.pitch, pitch, Time.deltaTime * 5f);
                 source.panStereo = Mathf.Lerp(source.panStereo, pan, Time.deltaTime * 5f);
             }
