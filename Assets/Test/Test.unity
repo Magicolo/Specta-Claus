@@ -597,7 +597,6 @@ MonoBehaviour:
     Y: 256
     Rate: 30
     Device: 0
-    Cursor: {fileID: 0}
     Output: {fileID: 7502025}
     Flash: {fileID: 1498371559}
     Clear: {fileID: 230209911}
@@ -607,7 +606,7 @@ MonoBehaviour:
     Voices: 256
     Saturate: 0.25
     Fade: 1
-    Attenuate: 0.25
+    Attenuate: 0.5
     Octaves: {x: 3, y: 7}
     Source: {fileID: 209803}
     Clips:
@@ -670,9 +669,6 @@ MonoBehaviour:
   Cursor:
     Color: {r: 23.968628, g: 10.039216, b: 0, a: 1}
     Adapt: 1
-  Flip:
-    X: 0
-    Y: 0
   Text: {fileID: 1725860455}
 --- !u!4 &1401311511
 Transform:

@@ -206,7 +206,7 @@ void Update(uint3 id : SV_DispatchThreadID)
 
     const int2 EmitRadius = int2(2, 5);
     const float EmitPower = 2.5;
-    const float2 EmitForce = float2(50, 250);
+    const float2 EmitForce = float2(100, 250);
     const float2 EmitForward = float2(0.5, 1);
     const float EmitPolarize = 0.75;
     const float EmitColorize = 10;

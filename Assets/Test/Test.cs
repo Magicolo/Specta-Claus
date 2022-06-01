@@ -229,7 +229,7 @@ Resolution: {size.x} x {size.y}" : "";
                 else if (explode)
                     cursor.sounds[y] = (Music.Clips[random.Next(Music.Clips.Length)], random.NextFloat(), random.NextFloat(0.5f, 2f), random.NextFloat(-1f, 1f));
                 else if (value > 0f && clips.TryAt(instrument, out var notes) && notes.TryAt(note / 12, out var clip))
-                    cursor.sounds[y] = (clip, Mathf.Clamp01(value * Music.Attenuate), Mathf.Pow(2, note % 12 / 12f), pan);
+                    cursor.sounds[y] = (clip, Mathf.Clamp01(Mathf.Pow(value, 0.75f) * Music.Attenuate), Mathf.Pow(2, note % 12 / 12f), pan);
                 else
                 {
                     cursor.sounds[y].volume = 0f;
