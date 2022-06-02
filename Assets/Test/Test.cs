@@ -22,6 +22,8 @@ public class Test : MonoBehaviour
         public Image Output;
         public Image Flash;
         public AudioSource Clear;
+        public AudioSource Save;
+        public AudioSource Load;
     }
 
     [Serializable]
@@ -73,6 +75,7 @@ public class Test : MonoBehaviour
     [Range(0f, 1f)]
     public float Delta = 0.01f;
     public float Explode = 1f;
+    public int Snapshots = 3;
     public ComputeShader Shader;
     public CameraSettings Camera = new();
     public MusicSettings Music = new();
@@ -119,44 +122,106 @@ public class Test : MonoBehaviour
             sounds: new (AudioClip clip, float volume, float pitch, float pan)[size.y],
             colors: new Color[size.y],
             buffer: new NativeArray<Color>(size.x * size.y, Allocator.Persistent));
+        var snapshots = (
+            index: 0,
+            magnitudes: new float[size.x * size.y],
+            buffer: new NativeArray<Color>(size.x * size.y, Allocator.Persistent),
+            archive: Enumerable.Range(0, Snapshots).Select(_ => (blur: Texture(size), score: 0f)).ToArray());
         Color.RGBToHSV(Cursor.Color, out cursor.hue, out cursor.saturation, out cursor.value);
 
         var time = Time.time;
         var request = AsyncGPUReadback.RequestIntoNativeArray(ref cursor.buffer, blur.input);
-        var explode = false;
+        var saving = false;
+        var exploding = false;
         var next = float.MaxValue;
         for (int y = 0; y < size.y; y++) StartCoroutine(Sound(y));
 
         while (true)
         {
             yield return null;
+            UnityEngine.Cursor.visible = Application.isEditor;
 
             var delta = Time.time - time;
             while (delta > 0 && deltas.Count >= 100) deltas.Dequeue();
             while (delta > 0 && deltas.Count < 100) deltas.Enqueue(1f / delta);
             if (_buttons.tab.Take()) mode = _modes[((int)mode + 1) % _modes.Length];
-
-            var clear = _buttons.Item1.Take();
-            if (clear)
-            {
-                Camera.Clear.Play();
-                Camera.Clear.volume = 1f;
-                Camera.Flash.color = Camera.Flash.color.With(a: 1f);
-            }
-            else
-            {
-                Camera.Clear.volume = Mathf.Clamp01(1f - Camera.Clear.time);
-                Camera.Flash.color = Color.Lerp(Camera.Flash.color, Camera.Flash.color.With(a: 0f), Time.deltaTime * 5f);
-            }
-
-            if (_buttons.Item2.Take()) { explode = true; next = time + 0.1f; }
-            else if (next < time) { explode = true; next = float.MaxValue; }
-            else explode = false;
-
             Text.text = _buttons.shift.Take() || mode > 0 ?
 $@"FPS: {deltas.Average():0.00}
 Mode: {mode}
 Resolution: {size.x} x {size.y}" : "";
+
+            var clear = _buttons.Item1.Take();
+            var explode = _buttons.Item2.Take();
+            var save = _buttons.Item3.Take();
+            var load = _buttons.Item4.Take();
+            Camera.Clear.volume = Mathf.Clamp01(1f - Camera.Clear.time);
+            Camera.Save.volume = Mathf.Clamp01(1f - Camera.Save.time);
+            Camera.Load.volume = Mathf.Clamp01(1f - Camera.Load.time);
+            Camera.Flash.color = Color.Lerp(Camera.Flash.color, Camera.Flash.color.With(a: 0f), Time.deltaTime * 5f);
+
+            if (explode) { exploding = true; next = time + 0.1f; }
+            else if (next < time) { exploding = true; next = float.MaxValue; }
+            else exploding = false;
+
+            if (clear || save || saving || load) Camera.Flash.color = Camera.Flash.color.With(a: 1f);
+            if (clear)
+            {
+                Camera.Clear.Play();
+                Camera.Clear.volume = 1f;
+            }
+            if (save)
+            {
+                /*
+                - Add points when the average magnitude of the 10% darkest pixels approaches 0.
+                - Add points when the overall average magnitude aproaches 1.
+                - Add points for heterogeneity?
+                - When loading, bias towards the last 10 most recent snapshots (50%) and the snapshots with the best scores (50% with index**2).
+                - When all snapshots slots are used, overwrite the lowest scoring snapshot that is not part of the 10 most recent ones.
+                */
+                Camera.Save.Play();
+                Camera.Save.volume = 1f;
+                StartCoroutine(Save());
+
+                IEnumerator Save()
+                {
+                    while (saving) yield return null;
+                    saving = true;
+                    {
+                        var index = Math.Min(snapshots.index++, snapshots.archive.Length - 1);
+                        var target = snapshots.archive[index].blur;
+                        Graphics.CopyTexture(blur.input, target);
+                        var request = AsyncGPUReadback.RequestIntoNativeArray(ref snapshots.buffer, target);
+                        while (!request.done) yield return null;
+
+                        for (int i = 0; i < snapshots.buffer.Length; i++)
+                        {
+                            var color = (Vector3)(Vector4)snapshots.buffer[i];
+                            snapshots.magnitudes[i] = color.magnitude;
+                        }
+                        Array.Sort(snapshots.magnitudes);
+                        var average = snapshots.magnitudes.Average();
+                        var brightest = snapshots.magnitudes.Skip(snapshots.magnitudes.Length * 3 / 4).Average();
+                        var darkest = snapshots.magnitudes.Take(snapshots.magnitudes.Length / 2).Average();
+                        var score =
+                            Math.Min(brightest, 7.5f) + // Reward if there are bright pixels.
+                            Math.Max(7.5f - darkest, 0f) + // Reward if there are dark pixels.
+                            Math.Max(7.5f - Math.Abs(average - 1f), 0) + // Reward if global average is close to 1.
+                            Math.Clamp(average - 1f, -1f, 0f) * 15f + // Penalize if global average is lower than 1.
+                            Math.Clamp(9f - average, -1f, 0f) * 15f; // Penalize if global average is higher than 9.
+                        snapshots.archive[index].score = score;
+                        Array.Sort(snapshots.archive, (left, right) => right.score.CompareTo(left.score));
+                    }
+                    saving = false;
+                }
+            }
+            if (load)
+            {
+                Camera.Load.Play();
+                Camera.Load.volume = 1f;
+                var index = Math.Pow(random.NextDouble(), 2) * Math.Min(snapshots.index, snapshots.archive.Length);
+                var source = snapshots.archive[(int)index];
+                Graphics.CopyTexture(source.blur, blur.input);
+            }
 
             var toColumn = (double)size.x / Music.Beats;
             var cursorBeat = time / 60f * Music.Tempo % Music.Beats;
@@ -173,9 +238,10 @@ Resolution: {size.x} x {size.y}" : "";
             Shader.SetFloat("Time", time);
             Shader.SetFloat("Delta", Delta);
             Shader.SetBool("Clear", clear);
-            Shader.SetFloat("Explode", explode ? Explode : 0f);
+            Shader.SetFloat("Explode", exploding ? Explode : 0f);
 
-            for (int step = 0; step < 10 && time < Time.time && Delta > 0f; step++, time += Delta)
+            var steps = Math.Clamp((int)(Time.time - time) / Delta, 1, 10);
+            for (int step = 0; step < steps; step++, time += Delta)
             {
                 Shader.SetFloat("Time", time);
                 Shader.SetVector("Seed", new Vector4(Random.value, Random.value, Random.value, Random.value));
@@ -226,7 +292,7 @@ Resolution: {size.x} x {size.y}" : "";
 
                 if (clear)
                     cursor.sounds[y].pitch = 0f;
-                else if (explode)
+                else if (exploding)
                     cursor.sounds[y] = (Music.Clips[random.Next(Music.Clips.Length)], random.NextFloat(), random.NextFloat(0.5f, 2f), random.NextFloat(-1f, 1f));
                 else if (value > 0f && clips.TryAt(instrument, out var notes) && notes.TryAt(note / 12, out var clip))
                     cursor.sounds[y] = (clip, Mathf.Clamp01(Mathf.Pow(value, 0.75f) * Music.Attenuate), Mathf.Pow(2, note % 12 / 12f), pan);
@@ -254,7 +320,7 @@ Resolution: {size.x} x {size.y}" : "";
             var last = default(AudioClip);
             while (source)
             {
-                if (explode && next < float.MaxValue) source.Stop();
+                if (exploding && next < float.MaxValue) source.Stop();
                 var (clip, volume, pitch, pan) = cursor.sounds[y];
 
                 if (clip == null || last == clip)
@@ -281,10 +347,10 @@ Resolution: {size.x} x {size.y}" : "";
 
     void Update()
     {
-        _buttons.Item1 |= Input.GetKey(KeyCode.Alpha1) || Input.GetKey(KeyCode.Keypad1);
+        _buttons.Item1 |= Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1);
         _buttons.Item2 |= Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2);
-        _buttons.Item3 |= Input.GetKey(KeyCode.Alpha3) || Input.GetKey(KeyCode.Keypad3);
-        _buttons.Item4 |= Input.GetKey(KeyCode.Alpha4) || Input.GetKey(KeyCode.Keypad4);
+        _buttons.Item3 |= Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3);
+        _buttons.Item4 |= Input.GetKeyDown(KeyCode.Alpha4) || Input.GetKeyDown(KeyCode.Keypad4);
         _buttons.left |= Input.GetKeyDown(KeyCode.LeftArrow);
         _buttons.right |= Input.GetKeyDown(KeyCode.RightArrow);
         _buttons.up |= Input.GetKeyDown(KeyCode.UpArrow);
