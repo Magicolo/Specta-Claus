@@ -289,7 +289,6 @@ void Update(uint3 id : SV_DispatchThreadID)
 
 
     float4 cameraInput = CameraInput[uint2(Width - id.x - 1, id.y)];
-    // float4 cameraInput = CameraInput[id.xy];
     cameraInput = pow(abs(cameraInput), CameraContrast);
     cameraInput = colorize(cameraInput, CameraColorize);
     const bool cameraValid = any(cameraInput.xyz >= float3(CameraThreshold, CameraThreshold, CameraThreshold));
@@ -347,14 +346,14 @@ void Update(uint3 id : SV_DispatchThreadID)
 
 
     const float2 explodeVelocity = (seed = random2(id.xy) * 2.0 - float2(1, 1)) * float2(Explode, Explode) * 1000;
-    const float4 explodeInput = particleColor + cursorColor + blurColor;
+    const float4 explodeInput = particleColor + blurColor;
     const float4 explodeColor = shift(normalize(explodeInput), 0.1, 0, 0) * any(explodeInput > float4(0.1, 0.1, 0.1, 0.1)) * any(Explode);
 
 
     VelocityOutput[id.xy] = fix4(float4(particleVelocity + emitVelocity + explodeVelocity, particleResidual)) * !Clear;
     ColorOutput[id.xy] = fix4(particleColor + emitColor + explodeColor) * !Clear;
-    EmitOutput[id.xy] = fix4(blurColor + explodeColor) * !Clear;
-    BlurOutput[id.xy] = fix4(blurOutput + explodeColor) * !Clear;
-    CameraOutput[id.xy] = fix4(cameraOutput + explodeColor) * !Clear;
+    EmitOutput[id.xy] = fix4(clamp(blurColor + explodeColor, 0, 105 - Explode)) * !Clear;
+    BlurOutput[id.xy] = fix4(clamp(blurOutput + explodeColor, 0, 105 - Explode)) * !Clear;
+    CameraOutput[id.xy] = fix4(clamp(cameraOutput + explodeColor, 0, 105 - Explode)) * !Clear;
     Output[id.xy] = fix4(clamp(particleColor + emitColor + cursorColor + blurColor, 0, 100));
 }

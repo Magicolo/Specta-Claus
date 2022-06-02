@@ -47,6 +47,8 @@ public class Test : MonoBehaviour
         public float Fade = 2.5f;
         [Range(0f, 1f)]
         public float Attenuate = 0.25f;
+        [Range(0f, 250f)]
+        public float Loud = 25f;
         public Vector2Int Octaves = new(4, 8);
         public AudioSource Source;
         public AudioClip[] Clips;
@@ -134,12 +136,14 @@ public class Test : MonoBehaviour
         var saving = false;
         var exploding = false;
         var next = float.MaxValue;
+        var attenuate = 1f;
         for (int y = 0; y < size.y; y++) StartCoroutine(Sound(y));
 
         while (true)
         {
             yield return null;
             UnityEngine.Cursor.visible = Application.isEditor;
+            attenuate = Mathf.Clamp01(2f - voices.Sum(voice => voice.isPlaying ? voice.volume : 0f) / Music.Loud);
 
             var delta = Time.time - time;
             while (delta > 0 && deltas.Count >= 100) deltas.Dequeue();
@@ -163,7 +167,7 @@ Resolution: {size.x} x {size.y}" : "";
             else if (next < time) { exploding = true; next = float.MaxValue; }
             else exploding = false;
 
-            if (clear || save || saving || load) Camera.Flash.color = Camera.Flash.color.With(a: 1f);
+            if (clear || explode || save || saving || load) Camera.Flash.color = Camera.Flash.color.With(a: 1f);
             if (clear)
             {
                 Camera.Clear.Play();
@@ -317,29 +321,30 @@ Resolution: {size.x} x {size.y}" : "";
         IEnumerator Sound(int y)
         {
             var source = voices[y];
-            var last = default(AudioClip);
+            var last = (clip: default(AudioClip), time: 0f);
             while (source)
             {
                 if (exploding && next < float.MaxValue) source.Stop();
                 var (clip, volume, pitch, pan) = cursor.sounds[y];
 
-                if (clip == null || last == clip)
+                if (clip == null || last.clip == clip)
                 {
                     source.volume = Mathf.Lerp(source.volume, volume, Time.deltaTime * Music.Fade);
                     source.pitch = Mathf.Lerp(source.pitch, pitch, Time.deltaTime * 5f);
                     source.panStereo = Mathf.Lerp(source.panStereo, pan, Time.deltaTime * 5f);
+                    last.clip = clip;
                 }
                 else
                 {
                     source.Stop();
                     source.name = clip.name;
                     source.clip = clip;
-                    source.volume = volume;
+                    source.volume = volume * attenuate;
                     source.pitch = pitch;
                     source.panStereo = pan;
                     source.time = 0f;
+                    last = (clip, time);
                 }
-                last = clip;
                 yield return null;
             }
         }

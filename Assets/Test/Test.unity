@@ -740,6 +740,7 @@ MonoBehaviour:
     Saturate: 0.25
     Fade: 1
     Attenuate: 0.5
+    Loud: 100
     Octaves: {x: 3, y: 7}
     Source: {fileID: 209803}
     Clips:
@@ -767,14 +768,6 @@ MonoBehaviour:
     - {fileID: 8300000, guid: d03c17ead9fcc7b4b859c82095cb988a, type: 3}
     - {fileID: 8300000, guid: 43f099ff1bfec9a42b7033c834300168, type: 3}
     - {fileID: 8300000, guid: 47734d90e8b3bef44b7561b4515829aa, type: 3}
-    - {fileID: 8300000, guid: 9bbf20bae620308448b62738ef7b435d, type: 3}
-    - {fileID: 8300000, guid: 81b1ac92e0c6acf499cf4bb166587e3d, type: 3}
-    - {fileID: 8300000, guid: 285d7996b3d571946a7101f814a6a733, type: 3}
-    - {fileID: 8300000, guid: 9b94a0b12bcd91e42b5e7ad3f5ba3723, type: 3}
-    - {fileID: 8300000, guid: a8dbba72c653ea044a1fbd09eadc0682, type: 3}
-    - {fileID: 8300000, guid: ef602bf0580b92f4f87c8a93080fdb9d, type: 3}
-    - {fileID: 8300000, guid: 23bc80666d6f7184498bc9576c97dd36, type: 3}
-    - {fileID: 8300000, guid: 92e3121f3ddd68f438e79308460d23f4, type: 3}
     - {fileID: 8300000, guid: aebf3bf944d541141a0df44c1c2dca17, type: 3}
     - {fileID: 8300000, guid: e6ba37ed57cfac54f93556524f40e6c8, type: 3}
     - {fileID: 8300000, guid: 75a03a01bbaf57d4794482970686313b, type: 3}
