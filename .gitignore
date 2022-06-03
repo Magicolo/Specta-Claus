@@ -14,6 +14,5 @@ Snapshots/
 Reaper/
 *.sln
 *.csproj
-
 .fake
 .ionide
