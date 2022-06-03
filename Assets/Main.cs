@@ -61,6 +61,7 @@ public sealed class Main : MonoBehaviour
     {
         public Color Color = Color.red;
         public Vector2Int Octaves = new(2, 8);
+        public float Volume = 1f;
         public AudioClip[] Clips;
     }
 
@@ -106,7 +107,6 @@ public sealed class Main : MonoBehaviour
 
         static Texture2D Texture(Vector2Int size) => new(size.x, size.y, GraphicsFormat.R32G32B32A32_SFloat, TextureCreationFlags.None)
         {
-            alphaIsTransparency = true,
             filterMode = FilterMode.Point,
         };
 
@@ -286,9 +286,9 @@ Resolution: {size.x} x {size.y}" : "";
                 if (clear)
                     cursor.sounds[y].pitch = 0f;
                 else if (exploding && Music.Instruments.TryRandom(out instrument) && instrument.Clips.TryRandom(out var clip))
-                    cursor.sounds[y] = (clip, random.NextFloat(), random.NextFloat(0.5f, 2f), random.NextFloat(-1f, 1f));
+                    cursor.sounds[y] = (clip, random.NextFloat(), random.NextFloat(0.5f, 2f) * instrument.Volume, random.NextFloat(-1f, 1f));
                 else if (value > 0f && instrument.Clips.TryAt(Math.Clamp(note / 12, instrument.Octaves.x, instrument.Octaves.y), out clip))
-                    cursor.sounds[y] = (clip, Mathf.Clamp01(Mathf.Pow(value, 0.75f) * Music.Attenuate), Mathf.Pow(2, note % 12 / 12f), pan);
+                    cursor.sounds[y] = (clip, Mathf.Clamp01(Mathf.Pow(value, 0.75f) * instrument.Volume * Music.Attenuate), Mathf.Pow(2, note % 12 / 12f), pan);
                 else
                 {
                     cursor.sounds[y].volume = 0f;
