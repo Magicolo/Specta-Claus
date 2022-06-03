@@ -11,7 +11,6 @@ Temp/
 Build/
 Builds/
 Snapshots/
-Reaper/
 *.sln
 *.csproj
 
