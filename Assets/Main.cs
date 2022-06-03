@@ -61,7 +61,6 @@ public sealed class Main : MonoBehaviour
     {
         public Color Color = Color.red;
         public Vector2Int Octaves = new(2, 8);
-        public float Volume = 1f;
         public AudioClip[] Clips;
     }
 
