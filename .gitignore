@@ -10,6 +10,7 @@ Library/
 Temp/
 Build/
 Builds/
+Snapshots/
 *.sln
 *.csproj
 

@@ -1,37 +1,20 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Diagnostics;
+using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using TMPro;
 using Unity.Collections;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Networking;
 using UnityEngine.Rendering;
 using UnityEngine.UI;
-using Debug = UnityEngine.Debug;
-using Random = System.Random;
+using Random = UnityEngine.Random;
 
-public class Main : MonoBehaviour
+public sealed class Main : MonoBehaviour
 {
-    [Serializable]
-    public sealed class PolarizeSettings
-    {
-        [Range(0f, 1f)]
-        public float Pre;
-        [Range(0f, 1f)]
-        public float Post;
-    }
-
-    [Serializable]
-    public sealed class MultiplySettings
-    {
-        [Range(0f, 3f)]
-        public float Pre = 1f;
-        [Range(0f, 3f)]
-        public float Post = 1f;
-    }
-
     [Serializable]
     public sealed class CameraSettings
     {
@@ -39,39 +22,18 @@ public class Main : MonoBehaviour
         public int Y = 128;
         public int Rate = 30;
         public int Device = 0;
-        public MultiplySettings Multiply = new();
-        public float Threshold = 0.5f;
-        public float Contrast = 5;
-        public float Jitter = 3f;
-        [Range(0f, 1f)]
-        public float Shape = 0.5f;
-        [Range(-1f, 1f)]
-        public float Inside = 0f;
-        [Range(-1f, 1f)]
-        public float Border = 1f;
-        [Range(0f, 1f)]
-        public float Unite = 0.5f;
-        public PolarizeSettings Polarize = new();
+        public Image Output;
+        public Image Flash;
         public Camera Camera;
     }
 
     [Serializable]
-    public sealed class ParticleSettings
+    public sealed class CursorSettings
     {
-        public float Fade = 5f;
-        public float Friction = 5f;
-        public float Power = 5f;
-        [Range(0f, 1f)]
-        public float Forward = 0.75f;
-        [Range(0f, 1f)]
-        public float Shine = 0.75f;
-        [Range(0f, 1f)]
-        public float Shift = 0.25f;
-        [Range(0f, 1f)]
-        public float Polarize = new();
-        public Vector2 Speed = new(5f, 10f);
-        public Vector2 Count = new(5f, 25f);
-        public Vector2 Radius = new(1f, 3f);
+        [ColorUsage(true, true)]
+        public Color Color = Color.yellow;
+        [Range(0f, 10f)]
+        public float Adapt = 1f;
     }
 
     [Serializable]
@@ -80,423 +42,450 @@ public class Main : MonoBehaviour
         public int Tempo = 120;
         public int Beats = 16;
         public int Voices = 16;
-        public float Threshold = 0.1f;
-        public float Duration = 0.1f;
-        public float Fade = 0.1f;
+        [Range(0f, 1f)]
+        public float Saturate = 0.1f;
+        [Range(0f, 10f)]
+        public float Fade = 2.5f;
+        [Range(0f, 1f)]
+        public float Attenuate = 0.25f;
+        [Range(0f, 250f)]
+        public float Loud = 25f;
         public Vector2Int Octaves = new(4, 8);
-        public AudioSource Source;
+        public AudioSource Particle;
+        public AudioSource Clear;
+        public AudioSource Save;
+        public AudioSource Load;
         public AudioClip[] Clips;
     }
 
-    [Serializable]
-    public sealed class CursorSettings
+    enum Modes
     {
-        [ColorUsage(true, true)]
-        public Color Color;
-        public float Speed = 0.25f;
-        [Range(0f, 1f)]
-        public float Blend = 0.25f;
-        [Range(0f, 100f)]
-        public float Trail = 100f;
-        [Range(0f, 10f)]
-        public float Fade = 5f;
-        [Range(0f, 10f)]
-        public float Adapt = 1f;
-    }
-
-    sealed class Sound
-    {
-        public AudioClip Clip;
-        public float Volume;
-        public float Pitch;
-        public float Pan;
-    }
-
-    sealed class Shape
-    {
-        public Color Color;
-        public int Pixels;
-    }
-
-    struct Datum
-    {
-        public Color Last;
-        public (Color color, Vector2 velocity, Vector2 remain) Particle;
-        public (Color color, bool valid) Read;
-        public (Color color, Color add, Shape shape) Shape;
+        None = 0,
+        Color = 1,
+        Velocity = 2,
+        Camera = 3,
+        Blur = 4,
+        Emit = 5,
     }
 
     static readonly int[] _pentatonic = { 0, 3, 5, 7, 10 };
+    static readonly Modes[] _modes = (Modes[])typeof(Modes).GetEnumValues();
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct ARGB
+    static int Snap(int note, int[] notes)
     {
-        public byte A;
-        public byte R;
-        public byte G;
-        public byte B;
-
-        public static implicit operator Color(ARGB color) => (Color32)color;
-        public static implicit operator Color32(ARGB color) => new(color.R, color.G, color.B, color.A);
-        public static implicit operator ARGB(Color32 color) => new() { A = color.a, R = color.r, G = color.g, B = color.b };
-        public static implicit operator ARGB(Color color) => (Color32)color;
+        var source = note % 12;
+        var target = notes.OrderBy(note => Math.Abs(note - source)).FirstOrDefault();
+        return note - source + target;
     }
 
-    public ParticleSettings Particle = new();
+    [Range(0f, 1f)]
+    public float Delta = 0.01f;
+    public float Explode = 1f;
+    public int Snapshots = 3;
+    public ComputeShader Shader;
     public CameraSettings Camera = new();
-    public CursorSettings Cursor = new();
     public MusicSettings Music = new();
+    public CursorSettings Cursor = new();
+    public TMP_Text Text;
 
-    public Image Renderer;
-    public Text FPS;
-
-    bool _fps;
-    bool _calibrate;
-    AudioClip[][] _clips = { };
-    readonly Stack<AudioSource> _sources = new();
-
-    void Awake() => _clips = Music.Clips
-        .GroupBy(clip => clip.name.Split('_')[0]).Select(group => group.ToArray())
-        .ToArray();
+    (bool, bool, bool, bool, bool tab, bool shift, bool space, bool left, bool right, bool up, bool down) _buttons;
 
     IEnumerator Start()
     {
+        static RenderTexture Render(Vector2Int size) => new(size.x, size.y, 1, GraphicsFormat.R32G32B32A32_SFloat)
+        {
+            enableRandomWrite = true,
+            filterMode = FilterMode.Point
+        };
+
+        static Texture2D Texture(Vector2Int size) => new(size.x, size.y, GraphicsFormat.R32G32B32A32_SFloat, TextureCreationFlags.None)
+        {
+            alphaIsTransparency = true,
+            filterMode = FilterMode.Point,
+        };
+
+        static NativeArray<Color> Buffer(int count)
+        {
+            var buffer = new NativeArray<Color>(count, Allocator.Persistent);
+            Application.quitting += () => { AsyncGPUReadback.WaitAllRequests(); buffer.Dispose(); };
+            return buffer;
+        }
+
         Debug.Log($"Devices: {string.Join(", ", WebCamTexture.devices.Select(device => device.name))}");
-        var device = WebCamTexture.devices[Camera.Device];
-        var texture = new WebCamTexture(device.name, Camera.X, Camera.Y, Camera.Rate) { autoFocusPoint = null, filterMode = FilterMode.Point };
-        texture.Play();
-        while (texture.width < 32 && texture.height < 32) yield return null;
-        Debug.Log($"Camera: {texture.deviceName} | Resolution: {texture.width}x{texture.height} | FPS: {texture.requestedFPS} | Graphics: {texture.graphicsFormat}");
+        var device = new WebCamTexture(WebCamTexture.devices[Camera.Device].name, Camera.X, Camera.Y, Camera.Rate)
+        {
+            autoFocusPoint = null,
+            filterMode = FilterMode.Point
+        };
+        device.Play();
+        while (device.width < 32 && device.height < 32) yield return null;
+        Debug.Log($"Camera: {device.deviceName} | Resolution: {device.width}x{device.height} | FPS: {device.requestedFPS} | Graphics: {device.graphicsFormat}");
 
-        var (width, height) = (texture.width, texture.height);
-        var random = new Random();
-        var pixels = new Color[width * height];
-        var cursor = Cursor.Color;
-        var camera = (
-            texture,
-            buffer: new NativeArray<ARGB>(width * height, Allocator.Persistent),
-            read: new ARGB[pixels.Length],
-            write: new ARGB[pixels.Length]);
-        var fps = (deltas: default(TimeSpan[]), index: 0);
-        var data = new Datum[pixels.Length];
-        var sounds = (add: new List<Sound>(), play: new List<Sound>());
-        var render = Camera.Camera.targetTexture;
-        Renderer.sprite = Sprite.Create(
-            new Texture2D(width, height, TextureFormat.RGBAFloat, 0, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Point },
-            new(0, 0, width, height),
-            new(width / 2, height / 2), 1);
+        var mode = Modes.None;
+        var random = new System.Random();
+        var deltas = new Queue<float>();
+        var clips = Music.Clips
+            .GroupBy(clip => clip.name.Split('_')[0]).Select(group => group.ToArray())
+            .ToArray();
+        var sources = new Stack<AudioSource>();
+        var size = new Vector2Int(device.width, device.height);
+        var camera = (input: device, output: Render(size));
+        var color = (input: Render(size), output: Render(size));
+        var velocity = (input: Render(size), output: Render(size));
+        var blur = (input: Render(size), output: Render(size));
+        var emit = (input: Render(size), output: Render(size));
+        var output = Render(size);
+        var voices = Enumerable.Range(0, size.y).Select(_ => Instantiate(Music.Particle)).ToArray();
+        var cursor = (color: Cursor.Color, hue: 0f, saturation: 0f, value: 0f,
+            output: Render(size),
+            sounds: new (AudioClip clip, float volume, float pitch, float pan)[size.y],
+            colors: new Color[size.y],
+            buffer: Buffer(size.x * size.y));
+        var snapshots = (
+            index: 0,
+            magnitudes: new float[size.x * size.y],
+            pending: Texture(size),
+            buffer: Buffer(size.x * size.y),
+            archive: Enumerable.Range(0, Snapshots).Select(_ => (texture: Texture(size), score: 0f)).ToArray());
+        var directory = Path.Combine(Application.dataPath, "..", "Snapshots");
+        if (!Directory.Exists(directory)) Directory.CreateDirectory(directory);
+        Color.RGBToHSV(Cursor.Color, out cursor.hue, out cursor.saturation, out cursor.value);
+        Archive();
+        Debug.Log($"Archive: {snapshots.index} | {string.Join(", ", snapshots.archive.Take(snapshots.index).Select(pair => pair.score))}");
 
-        // Wait until fps has stabilized.
-        for (int i = 0; i < 10; i++) yield return null;
-        var watch = Stopwatch.StartNew();
-        var time = watch.Elapsed;
+
+        var time = Time.time;
+        var request = AsyncGPUReadback.RequestIntoNativeArray(ref cursor.buffer, blur.input);
+        var saving = 0f;
+        var loading = (set: new HashSet<int>(), last: new Queue<int>());
+        var exploding = false;
+        var next = float.MaxValue;
+        var attenuate = 1f;
+        for (int y = 0; y < size.y; y++) StartCoroutine(Sound(y));
+
         while (true)
         {
+            yield return null;
             UnityEngine.Cursor.visible = Application.isEditor;
 
-            var delta = TimeSpan.FromSeconds(Math.Max(60.0 / Music.Tempo * Music.Beats / width, 1.0 / Camera.Rate));
-            var current = watch.Elapsed;
-            UpdateFPS(current - time);
+            var delta = Time.time - time;
+            while (delta > 0 && deltas.Count >= 100) deltas.Dequeue();
+            while (delta > 0 && deltas.Count < 100) deltas.Enqueue(1f / delta);
+            if (_buttons.tab.Take()) mode = _modes[((int)mode + 1) % _modes.Length];
+            Text.text = _buttons.shift.Take() || mode > 0 ?
+$@"FPS: {deltas.Average():0.00}
+Mode: {mode}
+Resolution: {size.x} x {size.y}" : "";
 
-            if (_calibrate)
+            attenuate = Mathf.Clamp01(2f - voices.Sum(voice => voice.isPlaying ? voice.volume : 0f) / Music.Loud);
+            var clear = _buttons.Item1.Take();
+            var explode = _buttons.Item2.Take();
+            var save = _buttons.Item3.Take();
+            var load = _buttons.Item4.Take();
+            Music.Clear.volume = Mathf.Clamp01(1f - Music.Clear.time);
+            Music.Save.volume = Mathf.Clamp01(1f - Music.Save.time);
+            Music.Load.volume = Mathf.Clamp01(1f - Music.Load.time);
+            Camera.Flash.material.SetFloat("_Flash", Mathf.Lerp(Camera.Flash.material.GetFloat("_Flash"), 0f, Time.deltaTime * 5f));
+
+            if (explode) { exploding = true; next = time + 0.1f; }
+            else if (next < time) { exploding = true; next = float.MaxValue; }
+            else exploding = false;
+
+            if (clear || explode || save || load) Camera.Flash.material.SetFloat("_Flash", 10f);
+            if (clear)
             {
-                Camera.Camera.targetTexture = null;
-                var request = AsyncGPUReadback.RequestIntoNativeArray(ref camera.buffer, texture);
+                Music.Clear.Play();
+                Music.Clear.volume = 1f;
+            }
+            if (save)
+            {
+                Music.Save.Play();
+                Music.Save.volume = 1f;
+                Music.Save.pitch = 0.5f;
+                foreach (var item in Save()) yield return item;
+                Music.Save.Play();
+                Music.Save.pitch = 1f;
+            }
+            if (load)
+            {
+                Music.Load.Play();
+                Music.Load.volume = 1f;
+                Load();
+            }
+
+            var toColumn = (double)size.x / Music.Beats;
+            var cursorBeat = time / 60f * Music.Tempo % Music.Beats;
+            var cursorColumn = (int)(cursorBeat * toColumn);
+            cursor.color = Color.HSVToRGB(cursor.hue, cursor.saturation, cursor.value);
+
+            Shader.SetInt("Width", size.x);
+            Shader.SetInt("Height", size.y);
+            Shader.SetTexture(0, "Output", output);
+            Shader.SetTexture(0, "CameraInput", camera.input);
+            Shader.SetTexture(0, "CameraOutput", camera.output);
+            Shader.SetInt("CursorColumn", cursorColumn);
+            Shader.SetVector("CursorColor", cursor.color);
+            Shader.SetFloat("Time", time);
+            Shader.SetFloat("Delta", Delta);
+            Shader.SetBool("Clear", clear);
+            Shader.SetFloat("Explode", exploding ? Explode : 0f);
+
+            var steps = Math.Clamp((int)(Time.time - time) / Delta, 1, 10);
+            for (int step = 0; step < steps; step++, time += Delta)
+            {
+                Shader.SetFloat("Time", time);
+                Shader.SetVector("Seed", new Vector4(Random.value, Random.value, Random.value, Random.value));
+                Shader.SetTexture(0, "VelocityInput", velocity.input);
+                Shader.SetTexture(0, "VelocityOutput", velocity.output);
+                Shader.SetTexture(0, "ColorInput", color.input);
+                Shader.SetTexture(0, "ColorOutput", color.output);
+                Shader.SetTexture(0, "BlurInput", blur.input);
+                Shader.SetTexture(0, "BlurOutput", blur.output);
+                Shader.SetTexture(0, "EmitInput", emit.input);
+                Shader.SetTexture(0, "EmitOutput", emit.output);
+                Shader.Dispatch(0, size.x / 8, size.y / 4, 1);
+                (velocity.input, velocity.output) = (velocity.output, velocity.input);
+                (color.input, color.output) = (color.output, color.input);
+                (blur.input, blur.output) = (blur.output, blur.input);
+                (emit.input, emit.output) = (emit.output, emit.input);
+            }
+            while (time < Time.time) time += Delta;
+
+            Camera.Output.material.mainTexture = _buttons.space.Take() ? output : mode switch
+            {
+                Modes.None => output,
+                Modes.Color => color.output,
+                Modes.Velocity => velocity.output,
+                Modes.Camera => device,
+                Modes.Blur => blur.output,
+                Modes.Emit => emit.output,
+                _ => default,
+            };
+
+            if (request.done)
+            {
+                for (int y = 0; y < size.y; y++) cursor.colors[y] = cursor.buffer[cursorColumn + y * size.x];
+                request = AsyncGPUReadback.RequestIntoNativeArray(ref cursor.buffer, blur.input);
+            }
+
+            var sum = cursor.color;
+            var pan = Mathf.Clamp01((float)cursorColumn / size.x) * 2f - 1f;
+            for (int y = 0; y < size.y; y++)
+            {
+                var pixel = cursor.colors[y];
+                sum += pixel;
+                Color.RGBToHSV(pixel, out var hue, out var saturation, out var value);
+
+                var instrument = (int)(hue * clips.Length);
+                var ratio = (float)y / size.y * (saturation * Music.Saturate + 1f - Music.Saturate);
+                var note = Snap((int)Mathf.Lerp(Music.Octaves.x * 12, Music.Octaves.y * 12, ratio), _pentatonic);
+
+                if (clear)
+                    cursor.sounds[y].pitch = 0f;
+                else if (exploding)
+                    cursor.sounds[y] = (Music.Clips[random.Next(Music.Clips.Length)], random.NextFloat(), random.NextFloat(0.5f, 2f), random.NextFloat(-1f, 1f));
+                else if (value > 0f && clips.TryAt(instrument, out var notes) && notes.TryAt(note / 12, out var clip))
+                    cursor.sounds[y] = (clip, Mathf.Clamp01(Mathf.Pow(value, 0.75f) * Music.Attenuate), Mathf.Pow(2, note % 12 / 12f), pan);
+                else
+                {
+                    cursor.sounds[y].volume = 0f;
+                    cursor.sounds[y].clip = default;
+                }
+            }
+            {
+                Color.RGBToHSV(sum, out var hue, out _, out _);
+                cursor.hue = Mathf.Lerp(cursor.hue, hue, delta * Cursor.Adapt);
+            }
+
+            if (exploding)
+            {
+                for (int i = 0; i < voices.Length; i++)
+                    if (voices[i] is AudioSource source && source.isPlaying) source.Stop();
+            }
+            else
+            {
+                Array.Sort(voices, (left, right) => right.volume.CompareTo(left.volume));
+                for (int i = 0; i < voices.Length && i < Music.Voices; i++)
+                    if (voices[i] is AudioSource source && !source.isPlaying) source.Play();
+                for (int i = Music.Voices; i < voices.Length; i++)
+                    if (voices[i] is AudioSource source && source.isPlaying) source.Stop();
+            }
+        }
+
+        IEnumerator Sound(int y)
+        {
+            var source = voices[y];
+            var last = (clip: default(AudioClip), time: 0f);
+            while (source)
+            {
+                var (clip, volume, pitch, pan) = cursor.sounds[y];
+                if (clip == null || last.clip == clip)
+                {
+                    source.volume = Mathf.Lerp(source.volume, volume, Time.deltaTime * Music.Fade);
+                    source.pitch = Mathf.Lerp(source.pitch, pitch, Time.deltaTime * 5f);
+                    source.panStereo = Mathf.Lerp(source.panStereo, pan, Time.deltaTime * 5f);
+                    last.clip = clip;
+                }
+                else
+                {
+                    source.Stop();
+                    source.name = clip.name;
+                    source.clip = clip;
+                    source.volume = volume * attenuate;
+                    source.pitch = pitch;
+                    source.panStereo = pan;
+                    source.time = 0f;
+                    last = (clip, time);
+                }
+                yield return null;
+            }
+        }
+
+        IEnumerable Save()
+        {
+            if (time - saving >= 2.5f)
+            {
+                var request = AsyncGPUReadback.RequestIntoNativeArray(ref snapshots.buffer, blur.input);
                 while (!request.done) yield return null;
-                for (int i = 0; i < camera.buffer.Length; i++) pixels[i] = camera.buffer[i];
-                Renderer.sprite.texture.SetPixels(pixels);
-                Renderer.sprite.texture.Apply(false, false);
-                yield return null;
-            }
-            else
-            {
-                Camera.Camera.targetTexture = render;
 
-                for (int i = 0; i < 10 && current - time >= delta; i++, time += delta)
+                for (int i = 0; i < snapshots.buffer.Length; i++)
                 {
-                    var process = Task.Run(() =>
-                    {
-                        var toBeat = (double)Music.Beats / width;
-                        var toColumn = (double)width / Music.Beats;
-                        var cursorBeat = time.TotalMinutes * Music.Tempo % Music.Beats;
-                        var cursorColumn = cursorBeat * toColumn;
-                        var friction = 1f - Mathf.Clamp01(Particle.Friction * (float)delta.TotalSeconds);
-                        var fade = 1f - Mathf.Clamp01(Particle.Fade * (float)delta.TotalSeconds);
-                        var sum = cursor;
-
-                        // Pass 1
-                        for (int i = 0; i < data.Length; i++)
-                            UpdateParticle(ref data[i], i % width, i / width, friction, fade, delta);
-
-                        // Pass 2
-                        for (int i = 0; i < data.Length; i++)
-                        {
-                            ref var datum = ref data[i];
-                            var x = i % width;
-                            var y = i / width;
-                            var wrap = x > cursorColumn ? x - width : x;
-                            var bar = (float)Math.Pow(1.0 - Math.Clamp(cursorColumn - wrap, 0, Cursor.Trail) / Cursor.Trail, Cursor.Fade) * cursor;
-
-                            UpdateRead(ref datum, camera.read[i]);
-                            UpdateShape(ref datum, x, y);
-                            UpdateBlur(ref datum, delta);
-                            sum += UpdatePixel(datum, ref pixels[i], x, y, (int)cursorColumn);
-                        }
-
-                        Color.RGBToHSV(sum, out var hue, out var saturation, out _);
-                        cursor = cursor.MapHSV(color => (
-                            Mathf.Lerp(color.h, hue, (float)delta.TotalSeconds * Cursor.Adapt),
-                            Mathf.Lerp(color.s, saturation, (float)delta.TotalSeconds * Cursor.Adapt),
-                            color.v)).Finite().Clamp(0f, 5f);
-                    });
-
-                    var request = AsyncGPUReadback.RequestIntoNativeArray(ref camera.buffer, texture);
-
-                    // Play sounds.
-                    for (int j = 0; j < Music.Voices && j < sounds.play.Count; j++)
-                        StartCoroutine(Play(sounds.play[UnityEngine.Random.Range(0, sounds.play.Count)]));
-                    sounds.play.Clear();
-
-                    while (!request.done) yield return null;
-                    camera.buffer.CopyTo(camera.write);
-                    while (!process.IsCompleted) yield return null;
-                    if (process.IsFaulted) Debug.LogException(process.Exception);
-                    // The swaps must be done after 'process' is complete since it uses both the 'read' and 'last' buffers.
-                    (camera.write, camera.read) = (camera.read, camera.write);
-                    (sounds.add, sounds.play) = (sounds.play, sounds.add);
-
-                    Renderer.sprite.texture.SetPixels(pixels);
-                    Renderer.sprite.texture.Apply(false, false);
-                    yield return null;
+                    var color = (Vector3)(Vector4)snapshots.buffer[i];
+                    snapshots.magnitudes[i] = color.magnitude;
                 }
-                // If 'time' is more than '10' frames late, skip the additional frames to prevent a lag spiral.
-                while (current - time >= delta) { time += delta; Debug.Log("Skipped a frame."); }
-            }
-        }
 
-        void UpdateParticle(ref Datum datum, int x, int y, float friction, float fade, TimeSpan delta)
-        {
-            ref var particle = ref datum.Particle;
-            particle.velocity *= friction;
-            particle.color *= fade;
+                Array.Sort(snapshots.magnitudes);
+                var average = snapshots.magnitudes.Average();
+                var bright = snapshots.magnitudes.Skip(snapshots.magnitudes.Length * 3 / 4).Average();
+                var dark = snapshots.magnitudes.Take(snapshots.magnitudes.Length / 2).Average();
+                var score =
+                    Math.Min(bright, 7.5f) + // Reward if there are bright pixels.
+                    Math.Max(7.5f - dark, 0f) + // Reward if there are dark pixels.
+                    Math.Max(7.5f - Math.Abs(average - 1f), 0) + // Reward if global average is close to 1.
+                    Math.Clamp(average - 1f, -1f, 0f) * 15f + // Penalize if global average is lower than 1.
+                    Math.Clamp(9f - average, -1f, 0f) * 15f; // Penalize if global average is higher than 9.
 
-            var velocity = particle.velocity * (float)delta.TotalSeconds + particle.remain.Take();
-            if (Mathf.Abs(velocity.x) < 1f && Mathf.Abs(velocity.y) < 1f)
-            {
-                if (particle.velocity.sqrMagnitude > 0.01f) particle.remain = velocity;
-            }
-            else
-            {
-                var position = (x: (int)(x + velocity.x).Wrap(width), y: (int)(y + velocity.y).Wrap(height));
-                ref var target = ref data[position.x + position.y * width].Particle;
-                target.velocity += particle.velocity.Take();
-                target.color = Color.Lerp(particle.color, target.color, 0.5f);
-            }
-        }
+                if (score >= 5f)
+                {
+                    var file = Path.Combine(directory, $"{score}~{DateTime.Now.ToFileTime()}".Replace('.', '_'));
+                    var snapshot = $"{file}.snapshot";
+                    var png = $"{file}.png";
+                    Camera.Flash.enabled = false;
+                    Camera.Output.material.mainTexture = emit.input;
+                    Camera.Camera.Render();
+                    ScreenCapture.CaptureScreenshot(png, 4);
+                    TryWrite(snapshot, snapshots.buffer);
+                    while (!File.Exists(png)) yield return null;
 
-        Color UpdatePixel(in Datum datum, ref Color pixel, int x, int y, int column)
-        {
-            var wrap = x > column ? x - width : x;
-            var bar = (float)Math.Pow(1.0 - Math.Clamp(column - wrap, 0, Cursor.Trail) / Cursor.Trail, Cursor.Fade) * cursor;
-            var valid = datum.Read.valid;
-            var shape = datum.Shape.color;
-            var last = datum.Last;
-            var particle = datum.Particle.color;
-            pixel = (bar + last + particle).Finite();
-
-            if (valid && x == column)
-            {
-                var ratio = Mathf.Pow(Math.Max(Math.Max(shape.r, shape.g), shape.b), Particle.Power);
-                var radius = Mathf.Lerp(Particle.Radius.x, Particle.Radius.y, ratio);
-                var count = Mathf.RoundToInt(Mathf.Lerp(Particle.Count.x, Particle.Count.y, ratio));
-                EmitParticle(x, y, Color.Lerp(shape, cursor, Cursor.Blend), radius, count);
-                EmitSound(x, y, shape);
-                return shape;
-            }
-            else return default;
-        }
-
-        void UpdateFPS(TimeSpan delta)
-        {
-            if (FPS.enabled = _fps)
-            {
-                fps.deltas ??= new TimeSpan[256];
-                fps.deltas[fps.index++ % fps.deltas.Length] = delta;
-                FPS.text = $"FPS: {fps.deltas.Take(fps.index).Average(delta => 1.0 / delta.TotalSeconds):00.000}";
-            }
-            else if (fps.index > 0 && fps.deltas is not null)
-            {
-                fps.index = 0;
-                fps.deltas = null;
-            }
-        }
-
-        void EmitParticle(int x, int y, Color color, float radius, int count)
-        {
-            var shift = color.ShiftHue(Particle.Shift);
-            for (int i = 0; i < count; i++)
-            {
-                var direction = new Vector2(random.NextFloat(-radius, radius * Particle.Forward), random.NextFloat(-radius, radius));
-                var position = (x: (int)(x + direction.x).Wrap(width), y: (int)(y + direction.y).Wrap(height));
-                ref var particle = ref data[position.x + position.y * width].Particle;
-                particle = (
-                    Color.Lerp(particle.color, particle.color.Polarize(Particle.Polarize) + shift, Particle.Shine),
-                    particle.velocity + direction * random.NextFloat(Particle.Speed.x, Particle.Speed.y),
-                    particle.remain);
-            }
-        }
-
-        IEnumerator Play(Sound sound)
-        {
-            var source = _sources.TryPop(out var value) && value ? value : Instantiate(Music.Source);
-            source.name = sound.Clip.name;
-            source.clip = sound.Clip;
-            source.volume = sound.Volume;
-            source.pitch = sound.Pitch;
-            source.panStereo = sound.Pan;
-            source.Play();
-
-            for (var counter = 0f; counter < Music.Duration && source.isPlaying; counter += Time.deltaTime)
-                yield return null;
-
-            for (var counter = 0f; counter < Music.Fade && source.isPlaying; counter += Time.deltaTime)
-            {
-                source.volume = sound.Volume * (1f - Mathf.Clamp01(counter / Music.Fade));
+                    Camera.Flash.enabled = true;
+                    snapshots.pending.SetPixelData(snapshots.buffer, 0);
+                    Commit(score);
+                    Sort();
+                    saving = time;
+                    Debug.Log($"Save: {score} | {file}");
+                }
                 yield return null;
             }
-
-            source.Stop();
-            _sources.Push(source);
         }
 
-        void EmitSound(int x, int y, Color color)
+        void Load()
         {
-            Color.RGBToHSV(color, out var hue, out var saturation, out var value);
-            if (value < Music.Threshold) return;
+            var count = Math.Min(snapshots.index, snapshots.archive.Length);
+            var index = (int)(Math.Pow(random.NextDouble(), 2.5) * Math.Min(snapshots.index, snapshots.archive.Length));
+            while (loading.last.Count > count / 10 && loading.last.TryDequeue(out var last)) loading.set.Remove(last);
+            for (; index < count; index++) if (loading.set.Add(index)) { loading.last.Enqueue(index); break; }
 
-            var note = Snap((int)((float)y / height * 80f), _pentatonic);
-            if (_clips.TryAt((int)(hue * _clips.Length), out var clips) && clips.TryAt(note / 12, out var clip))
-                sounds.add.Add(new Sound
-                {
-                    Clip = clip,
-                    Volume = value * value,
-                    Pitch = Mathf.Pow(2, note % 12 / 12f),
-                    Pan = Mathf.Clamp01((float)x / width) * 2f - 1f,
-                });
+            var source = snapshots.archive[index];
+            var previous = RenderTexture.active;
+            RenderTexture.active = blur.input;
+            Graphics.CopyTexture(source.texture, blur.input);
+            RenderTexture.active = previous;
+            Debug.Log($"Load: {index} / {count}");
         }
 
-        ref readonly Datum Get(int x, int y) => ref data[x + y * width];
-
-        void UpdateShape(ref Datum datum, int x, int y)
+        void Commit(float score)
         {
-            ref var shape = ref datum.Shape;
-            var read = datum.Read.color;
-            var left = Math.Max(x - 1, 0);
-            var right = Math.Min(x + 1, width - 1);
-            var bottom = Math.Max(y - 1, 0);
-            var top = Math.Min(y + 1, height - 1);
-            if (shape.shape == null)
+            var index = Math.Min(snapshots.index++, snapshots.archive.Length - 1);
+            snapshots.pending.Apply();
+            var snapshot = snapshots.archive[index].Set((texture: snapshots.pending, score));
+            snapshots.pending = snapshot.texture;
+        }
+
+        void Sort() => Array.Sort(snapshots.archive, (left, right) => right.score.CompareTo(left.score));
+
+        void Archive()
+        {
+            var pairs = Directory.EnumerateFiles(directory, "*.snapshot")
+                .AsParallel()
+                .Select(path =>
+                    float.TryParse(Path.GetFileNameWithoutExtension(path).Split('~')[0].Replace('_', '.'), out var score) ?
+                    (path, score) : default)
+                .Where(pair => pair.path is not null && pair.score > 0)
+                .OrderByDescending(pair => pair.score)
+                .Take(snapshots.archive.Length)
+                .Select(pair => TryRead(pair.path, out var pixels) ? (pixels, pair.score) : default)
+                .Where(pair => pair.pixels is not null && pair.score > 0);
+            foreach (var (pixels, score) in pairs)
             {
-                if (Valid(read, Camera.Shape))
-                {
-                    // Try to share a shape in the surrounding pixels.
-                    for (int xx = left; xx <= right; xx++)
-                        for (int yy = bottom; yy <= top; yy++)
-                            if (Get(xx, yy).Shape.shape is Shape other)
-                            {
-                                other.Pixels++;
-                                other.Color += read;
-                                shape = (default, read, other);
-                                return;
-                            }
+                snapshots.pending.SetPixels(pixels);
+                Commit(score);
+            }
+            Sort();
+        }
 
-                    // No shape was found around this pixel so create one.
-                    shape = (default, read, new Shape { Color = read, Pixels = 1 });
+        static bool TryRead(string path, out Color[] pixels)
+        {
+            try
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read);
+                using var reader = new BinaryReader(stream);
+                if (reader.ReadInt32() == 1) // Version
+                {
+                    pixels = new Color[reader.ReadInt32()];
+                    for (int i = 0; i < pixels.Length; i++)
+                        pixels[i] = new(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+                    return true;
                 }
             }
-            else if (Valid(read, Camera.Shape))
+            catch { }
+
+            pixels = default;
+            return false;
+        }
+
+        static bool TryWrite(string path, NativeArray<Color> pixels)
+        {
+            try
             {
-                // Pixel is still valid in its shape.
-                shape.shape.Color -= shape.add;
-                shape.shape.Color += shape.add = read;
-                // Determine if the pixel is on the border of the shape.
-                for (int xx = left; xx <= right; xx++)
-                    for (int yy = bottom; yy <= top; yy++)
-                        if (Get(xx, yy).Shape.shape != shape.shape)
-                        {
-                            datum.Shape.color = Color.Lerp(read, shape.shape.Color / shape.shape.Pixels, Camera.Unite) * Camera.Border;
-                            return;
-                        }
-
-                datum.Shape.color = Color.Lerp(read, shape.shape.Color / shape.shape.Pixels, Camera.Unite) * Camera.Inside;
+                using var stream = new FileStream(path, FileMode.Create, FileAccess.Write);
+                using var writer = new BinaryWriter(stream);
+                writer.Write(1); // Version
+                writer.Write(pixels.Length);
+                foreach (var color in pixels)
+                {
+                    writer.Write(color.r);
+                    writer.Write(color.g);
+                    writer.Write(color.b);
+                    writer.Write(color.a);
+                }
+                return true;
             }
-            else
-            {
-                // Pixel is now invalid in its shape. Remove it.
-                shape.shape.Pixels--;
-                shape.shape.Color -= shape.add;
-                shape = (read, default, default);
-            }
-        }
-
-        void UpdateRead(ref Datum datum, Color color)
-        {
-            color = Color.Lerp(color, color.Polarize(), Camera.Polarize.Pre);
-            color *= Camera.Multiply.Pre;
-            color.r = Mathf.Pow(color.r, Camera.Contrast);
-            color.g = Mathf.Pow(color.g, Camera.Contrast);
-            color.b = Mathf.Pow(color.b, Camera.Contrast);
-            color *= Camera.Multiply.Post;
-
-            var valid = Valid(color, Camera.Threshold);
-            datum.Read = (valid ? Color.Lerp(color, color.Polarize(), Camera.Polarize.Post) : default, valid);
-        }
-
-        void UpdateBlur(ref Datum datum, TimeSpan delta)
-        {
-            datum.Last = Color.Lerp(datum.Last, datum.Read.color + datum.Shape.color, Mathf.Clamp01(Camera.Jitter * (float)delta.TotalSeconds));
-        }
-
-        static bool Valid(Color color, float threshold) => color.r >= threshold || color.g >= threshold || color.b >= threshold;
-
-        static int Snap(int note, int[] notes)
-        {
-            var source = note % 12;
-            var target = notes.OrderBy(note => Math.Abs(note - source)).FirstOrDefault();
-            return note - source + target;
+            catch { return false; }
         }
     }
 
     void Update()
     {
-        if (Input.GetKeyDown(KeyCode.C)) _calibrate = !_calibrate;
-        if (Input.GetKeyDown(KeyCode.F)) _fps = !_fps;
-
-        if (transform is RectTransform rectangle)
-        {
-            if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
-            {
-                if (Input.GetKeyDown(KeyCode.Space)) rectangle.localEulerAngles = rectangle.localEulerAngles.With(x: 0f, y: 0f);
-                if (Input.GetKey(KeyCode.LeftArrow)) rectangle.localEulerAngles += new Vector3(0f, -1f, 0f);
-                if (Input.GetKey(KeyCode.RightArrow)) rectangle.localEulerAngles += new Vector3(0f, 1f, 0f);
-                if (Input.GetKey(KeyCode.DownArrow)) rectangle.localEulerAngles += new Vector3(-1f, 0f, 0f);
-                if (Input.GetKey(KeyCode.UpArrow)) rectangle.localEulerAngles += new Vector3(1f, 0f, 0f);
-            }
-            else if (Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt))
-            {
-                if (Input.GetKeyDown(KeyCode.Space)) rectangle.localEulerAngles = rectangle.localEulerAngles.With(z: 0f);
-                if (Input.GetKey(KeyCode.LeftArrow)) rectangle.localEulerAngles += new Vector3(0f, 0f, -1f);
-                if (Input.GetKey(KeyCode.RightArrow)) rectangle.localEulerAngles += new Vector3(0f, 0f, 1f);
-            }
-            else
-            {
-                var sign = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl) ? -1f : 1f;
-                if (Input.GetKeyDown(KeyCode.Space)) { rectangle.offsetMin = default; rectangle.offsetMax = default; }
-                if (Input.GetKey(KeyCode.LeftArrow)) rectangle.offsetMin += new Vector2(-1f, 0f) * sign;
-                if (Input.GetKey(KeyCode.RightArrow)) rectangle.offsetMax += new Vector2(1f, 0f) * sign;
-                if (Input.GetKey(KeyCode.DownArrow)) rectangle.offsetMin += new Vector2(0f, -1f) * sign;
-                if (Input.GetKey(KeyCode.UpArrow)) rectangle.offsetMax += new Vector2(0f, 1f) * sign;
-            }
-        }
+        _buttons.Item1 |= Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1);
+        _buttons.Item2 |= Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2);
+        _buttons.Item3 |= Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3);
+        _buttons.Item4 |= Input.GetKeyDown(KeyCode.Alpha4) || Input.GetKeyDown(KeyCode.Keypad4);
+        _buttons.left |= Input.GetKeyDown(KeyCode.LeftArrow);
+        _buttons.right |= Input.GetKeyDown(KeyCode.RightArrow);
+        _buttons.up |= Input.GetKeyDown(KeyCode.UpArrow);
+        _buttons.down |= Input.GetKeyDown(KeyCode.DownArrow);
+        _buttons.tab |= Input.GetKeyDown(KeyCode.Tab);
+        _buttons.shift |= Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+        _buttons.space |= Input.GetKey(KeyCode.Space);
     }
 }

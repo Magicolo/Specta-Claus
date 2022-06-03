@@ -206,7 +206,7 @@ void Update(uint3 id : SV_DispatchThreadID)
 
     const int2 EmitRadius = int2(2, 5);
     const float EmitPower = 2.5;
-    const float2 EmitForce = float2(100, 250);
+    const float2 EmitForce = float2(100, 500);
     const float2 EmitForward = float2(0.5, 1);
     const float EmitPolarize = 0.75;
     const float EmitColorize = 10;
@@ -352,8 +352,8 @@ void Update(uint3 id : SV_DispatchThreadID)
 
     VelocityOutput[id.xy] = fix4(float4(particleVelocity + emitVelocity + explodeVelocity, particleResidual)) * !Clear;
     ColorOutput[id.xy] = fix4(particleColor + emitColor + explodeColor) * !Clear;
-    EmitOutput[id.xy] = fix4(clamp(blurColor + explodeColor, 0, 105 - Explode)) * !Clear;
-    BlurOutput[id.xy] = fix4(clamp(blurOutput + explodeColor, 0, 105 - Explode)) * !Clear;
-    CameraOutput[id.xy] = fix4(clamp(cameraOutput + explodeColor, 0, 105 - Explode)) * !Clear;
+    EmitOutput[id.xy] = fix4(blurColor + explodeColor) * !Clear;
+    BlurOutput[id.xy] = fix4(blurOutput + explodeColor) * !Clear;
+    CameraOutput[id.xy] = fix4(cameraOutput + explodeColor) * !Clear;
     Output[id.xy] = fix4(clamp(particleColor + emitColor + cursorColor + blurColor, 0, 100));
 }
