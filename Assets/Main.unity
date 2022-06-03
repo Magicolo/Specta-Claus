@@ -747,7 +747,7 @@ MonoBehaviour:
     Instruments:
     - Color: {r: 0, g: 0.25, b: 1, a: 1}
       Octaves: {x: 2, y: 8}
-      Volume: 1
+      Volume: 1.5
       Clips:
       - {fileID: 8300000, guid: ffb668f532506004e8d4912044ba1f98, type: 3}
       - {fileID: 8300000, guid: aa2df89355d2eb34aaa8c24db07aa9f9, type: 3}
@@ -758,7 +758,7 @@ MonoBehaviour:
       - {fileID: 8300000, guid: bce4caf815d79994990e6f0737e56231, type: 3}
     - Color: {r: 0, g: 1, b: 0.083333254, a: 1}
       Octaves: {x: 2, y: 8}
-      Volume: 1
+      Volume: 2
       Clips:
       - {fileID: 8300000, guid: 49d9a87dc01d9d84c97ef4fdfc0a2016, type: 3}
       - {fileID: 8300000, guid: c7fcdeb9e2b8be94f9fc6e45058d1c07, type: 3}
