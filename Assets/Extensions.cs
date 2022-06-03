@@ -366,6 +366,18 @@ public static class Extensions
         return Color.HSVToRGB(hue, saturation, value);
     }
 
+    public static T MinBy<T, TValue>(this IEnumerable<T> source, Func<T, TValue> by) where TValue : IComparable<TValue>
+    {
+        var first = true;
+        var best = (item: default(T), value: default(TValue));
+        foreach (var item in source)
+        {
+            var value = by(item);
+            if (first.Change(false) || value.CompareTo(best.value) < 0) best = (item, value);
+        }
+        return best.item;
+    }
+
     public static bool TryRandom<T>(this IReadOnlyList<T> list, out T value, Random random = default)
     {
         if (list.Count == 0)

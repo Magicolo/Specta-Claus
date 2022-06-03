@@ -3,12 +3,10 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Threading.Tasks;
 using TMPro;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
-using UnityEngine.Networking;
 using UnityEngine.Rendering;
 using UnityEngine.UI;
 using Random = UnityEngine.Random;
@@ -55,6 +53,15 @@ public sealed class Main : MonoBehaviour
         public AudioSource Clear;
         public AudioSource Save;
         public AudioSource Load;
+        public InstrumentSettings[] Instruments;
+    }
+
+    [Serializable]
+    public sealed class InstrumentSettings
+    {
+        public Color Color = Color.red;
+        public Vector2Int Octaves = new(2, 8);
+        public float Volume = 1f;
         public AudioClip[] Clips;
     }
 
@@ -124,9 +131,6 @@ public sealed class Main : MonoBehaviour
         var mode = Modes.None;
         var random = new System.Random();
         var deltas = new Queue<float>();
-        var clips = Music.Clips
-            .GroupBy(clip => clip.name.Split('_')[0]).Select(group => group.ToArray())
-            .ToArray();
         var sources = new Stack<AudioSource>();
         var size = new Vector2Int(device.width, device.height);
         var camera = (input: device, output: Render(size));
@@ -276,15 +280,15 @@ Resolution: {size.x} x {size.y}" : "";
                 sum += pixel;
                 Color.RGBToHSV(pixel, out var hue, out var saturation, out var value);
 
-                var instrument = (int)(hue * clips.Length);
+                var instrument = Music.Instruments.MinBy(instrument => Vector3.Distance((Vector4)instrument.Color, (Vector4)pixel));
                 var ratio = (float)y / size.y * (saturation * Music.Saturate + 1f - Music.Saturate);
                 var note = Snap((int)Mathf.Lerp(Music.Octaves.x * 12, Music.Octaves.y * 12, ratio), _pentatonic);
 
                 if (clear)
                     cursor.sounds[y].pitch = 0f;
-                else if (exploding)
-                    cursor.sounds[y] = (Music.Clips[random.Next(Music.Clips.Length)], random.NextFloat(), random.NextFloat(0.5f, 2f), random.NextFloat(-1f, 1f));
-                else if (value > 0f && clips.TryAt(instrument, out var notes) && notes.TryAt(note / 12, out var clip))
+                else if (exploding && Music.Instruments.TryRandom(out instrument) && instrument.Clips.TryRandom(out var clip))
+                    cursor.sounds[y] = (clip, random.NextFloat(), random.NextFloat(0.5f, 2f), random.NextFloat(-1f, 1f));
+                else if (value > 0f && instrument.Clips.TryAt(Math.Clamp(note / 12, instrument.Octaves.x, instrument.Octaves.y), out clip))
                     cursor.sounds[y] = (clip, Mathf.Clamp01(Mathf.Pow(value, 0.75f) * Music.Attenuate), Mathf.Pow(2, note % 12 / 12f), pan);
                 else
                 {
