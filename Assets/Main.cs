@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using TMPro;
 using Unity.Collections;
@@ -9,6 +10,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.UI;
+using CompressionLevel = System.IO.Compression.CompressionLevel;
 using Random = UnityEngine.Random;
 
 public sealed class Main : MonoBehaviour
@@ -364,11 +366,11 @@ Resolution: {size.x} x {size.y}" : "";
                 var bright = snapshots.magnitudes.Skip(snapshots.magnitudes.Length * 3 / 4).Average();
                 var dark = snapshots.magnitudes.Take(snapshots.magnitudes.Length / 2).Average();
                 var score =
-                    Math.Min(bright, 7.5f) + // Reward if there are bright pixels.
-                    Math.Max(7.5f - dark, 0f) + // Reward if there are dark pixels.
-                    Math.Max(7.5f - Math.Abs(average - 1f), 0) + // Reward if global average is close to 1.
-                    Math.Clamp(average - 1f, -1f, 0f) * 15f + // Penalize if global average is lower than 1.
-                    Math.Clamp(9f - average, -1f, 0f) * 15f; // Penalize if global average is higher than 9.
+                    Math.Min(bright, 5f) + // Reward if there are bright pixels.
+                    Math.Max(5f - dark, 0f) + // Reward if there are dark pixels.
+                    Math.Max(10f - Math.Abs(average - 1f), 0) + // Reward if global average is close to 1.
+                    Math.Clamp(average - 1f, -1f, 0f) * 10f + // Penalize if global average is lower than 1.
+                    Math.Clamp(9f - average, -1f, 0f) * 10f; // Penalize if global average is higher than 9.
 
                 if (score >= 5f)
                 {
@@ -396,6 +398,8 @@ Resolution: {size.x} x {size.y}" : "";
         void Load()
         {
             var count = Math.Min(snapshots.index, snapshots.archive.Length);
+            if (count <= 0) return;
+
             var index = (int)(Math.Pow(random.NextDouble(), 2.5) * Math.Min(snapshots.index, snapshots.archive.Length));
             while (loading.last.Count > count / 10 && loading.last.TryDequeue(out var last)) loading.set.Remove(last);
             for (; index < count; index++) if (loading.set.Add(index)) { loading.last.Enqueue(index); break; }
@@ -443,16 +447,20 @@ Resolution: {size.x} x {size.y}" : "";
             try
             {
                 using var stream = new FileStream(path, FileMode.Open, FileAccess.Read);
-                using var reader = new BinaryReader(stream);
-                if (reader.ReadInt32() == 1) // Version
+                using var zip = new ZipArchive(stream, ZipArchiveMode.Read);
+                using var reader = new BinaryReader(zip.GetEntry("snapshot").Open());
+
+                var version = reader.ReadInt32();
+                if (version == 1)
                 {
                     pixels = new Color[reader.ReadInt32()];
                     for (int i = 0; i < pixels.Length; i++)
                         pixels[i] = new(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
                     return true;
                 }
+                else Debug.LogError($"Invalid version '{version}'.");
             }
-            catch { }
+            catch (Exception exception) { Debug.LogException(exception); }
 
             pixels = default;
             return false;
@@ -460,11 +468,13 @@ Resolution: {size.x} x {size.y}" : "";
 
         static bool TryWrite(string path, NativeArray<Color> pixels)
         {
+            const int Version = 1;
             try
             {
                 using var stream = new FileStream(path, FileMode.Create, FileAccess.Write);
-                using var writer = new BinaryWriter(stream);
-                writer.Write(1); // Version
+                using var zip = new ZipArchive(stream, ZipArchiveMode.Create);
+                using var writer = new BinaryWriter(zip.CreateEntry("snapshot", CompressionLevel.Optimal).Open());
+                writer.Write(Version);
                 writer.Write(pixels.Length);
                 foreach (var color in pixels)
                 {
@@ -475,7 +485,8 @@ Resolution: {size.x} x {size.y}" : "";
                 }
                 return true;
             }
-            catch { return false; }
+            catch (Exception exception) { Debug.LogException(exception); }
+            return false;
         }
     }
 
