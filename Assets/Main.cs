@@ -378,7 +378,7 @@ Resolution: {size.x} x {size.y}" : "";
                     Camera.Flash.enabled = false;
                     Camera.Output.material.mainTexture = emit.input;
                     Camera.Camera.Render();
-                    ScreenCapture.CaptureScreenshot(png, 3);
+                    ScreenCapture.CaptureScreenshot(png);
                     TryWrite(snapshot, snapshots.buffer);
                     while (!File.Exists(png)) yield return null;
 
