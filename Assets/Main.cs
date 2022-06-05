@@ -455,7 +455,7 @@ Resolution: {size.x} x {size.y}" : "";
                 {
                     pixels = new Color[reader.ReadInt32()];
                     for (int i = 0; i < pixels.Length; i++)
-                        pixels[i] = new(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+                        pixels[i] = new(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), 1f);
                     return true;
                 }
                 else Debug.LogError($"Invalid version '{version}'.");
@@ -481,7 +481,6 @@ Resolution: {size.x} x {size.y}" : "";
                     writer.Write(color.r);
                     writer.Write(color.g);
                     writer.Write(color.b);
-                    writer.Write(color.a);
                 }
                 return true;
             }
