@@ -604,7 +604,7 @@ AudioSource:
   serializedVersion: 4
   OutputAudioMixerGroup: {fileID: -7651205975284305175, guid: 1c338cf025077c344b79608670f1a7b0,
     type: 2}
-  m_audioClip: {fileID: 8300000, guid: 43f099ff1bfec9a42b7033c834300168, type: 3}
+  m_audioClip: {fileID: 8300000, guid: 511f175a68dd2d74cb312858bb1cc071, type: 3}
   m_PlayOnAwake: 0
   m_Volume: 1
   m_Pitch: 1
@@ -745,20 +745,9 @@ MonoBehaviour:
     Save: {fileID: 1134758356}
     Load: {fileID: 1474003657}
     Instruments:
-    - Color: {r: 0, g: 0.25, b: 1, a: 1}
+    - Color: {r: 0, g: 1, b: 0, a: 1}
       Octaves: {x: 2, y: 8}
-      Volume: 1.5
-      Clips:
-      - {fileID: 8300000, guid: ffb668f532506004e8d4912044ba1f98, type: 3}
-      - {fileID: 8300000, guid: aa2df89355d2eb34aaa8c24db07aa9f9, type: 3}
-      - {fileID: 8300000, guid: c231ffa6289c6c14282fee746ed8b8ee, type: 3}
-      - {fileID: 8300000, guid: 705c86bc9da6f554e922d2f574eb35ea, type: 3}
-      - {fileID: 8300000, guid: 08e22e2806b946c4fa8be30415624ef2, type: 3}
-      - {fileID: 8300000, guid: 5218f407689437641a897dd7993c9e48, type: 3}
-      - {fileID: 8300000, guid: bce4caf815d79994990e6f0737e56231, type: 3}
-    - Color: {r: 0, g: 1, b: 0.083333254, a: 1}
-      Octaves: {x: 2, y: 8}
-      Volume: 2
+      Volume: 3
       Clips:
       - {fileID: 8300000, guid: 49d9a87dc01d9d84c97ef4fdfc0a2016, type: 3}
       - {fileID: 8300000, guid: c7fcdeb9e2b8be94f9fc6e45058d1c07, type: 3}
@@ -767,7 +756,18 @@ MonoBehaviour:
       - {fileID: 8300000, guid: e8453b0979ea8d24bb8da42ab7cbaf46, type: 3}
       - {fileID: 8300000, guid: 05d2bc97f238bdd418a7d0798276800e, type: 3}
       - {fileID: 8300000, guid: 0bf9b291c43d88e4d98d0d961ab8a2f7, type: 3}
-    - Color: {r: 1, g: 0.8333334, b: 0, a: 1}
+    - Color: {r: 0, g: 0, b: 1, a: 1}
+      Octaves: {x: 2, y: 8}
+      Volume: 1
+      Clips:
+      - {fileID: 8300000, guid: ffb668f532506004e8d4912044ba1f98, type: 3}
+      - {fileID: 8300000, guid: aa2df89355d2eb34aaa8c24db07aa9f9, type: 3}
+      - {fileID: 8300000, guid: c231ffa6289c6c14282fee746ed8b8ee, type: 3}
+      - {fileID: 8300000, guid: 705c86bc9da6f554e922d2f574eb35ea, type: 3}
+      - {fileID: 8300000, guid: 08e22e2806b946c4fa8be30415624ef2, type: 3}
+      - {fileID: 8300000, guid: 5218f407689437641a897dd7993c9e48, type: 3}
+      - {fileID: 8300000, guid: bce4caf815d79994990e6f0737e56231, type: 3}
+    - Color: {r: 1, g: 1, b: 0, a: 1}
       Octaves: {x: 2, y: 9}
       Volume: 1
       Clips:
@@ -779,7 +779,7 @@ MonoBehaviour:
       - {fileID: 8300000, guid: 86d4d3acc8f7aed46bce4eef59812bf4, type: 3}
       - {fileID: 8300000, guid: 816aaf1d2c8fa39408426fe3d49c54ff, type: 3}
       - {fileID: 8300000, guid: adf04e7f1ba9c0c4b812ae8cbd52dc7b, type: 3}
-    - Color: {r: 1, g: 0, b: 0.16666698, a: 1}
+    - Color: {r: 1, g: 0.15, b: 0, a: 1}
       Octaves: {x: 2, y: 9}
       Volume: 1
       Clips:
@@ -803,7 +803,7 @@ MonoBehaviour:
       - {fileID: 8300000, guid: 8bc4567aadfff7648a9b73d177359ccc, type: 3}
       - {fileID: 8300000, guid: 00bb4a2dd60e73c4ca8dbee26a6f7c03, type: 3}
       - {fileID: 8300000, guid: e1808ec7c3041fb448b640f2898bdc1c, type: 3}
-    - Color: {r: 0, g: 0, b: 0, a: 1}
+    - Color: {r: 0.5, g: 0.45833334, b: 0.25, a: 1}
       Octaves: {x: 2, y: 9}
       Volume: 1
       Clips:

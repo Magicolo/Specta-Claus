@@ -158,7 +158,7 @@ public sealed class Main : MonoBehaviour
 
 
         var time = Time.time;
-        var request = AsyncGPUReadback.RequestIntoNativeArray(ref cursor.buffer, blur.input);
+        var request = AsyncGPUReadback.RequestIntoNativeArray(ref cursor.buffer, emit.input);
         var saving = 0f;
         var loading = (set: new HashSet<int>(), last: new Queue<int>());
         var exploding = false;
@@ -268,7 +268,7 @@ Resolution: {size.x} x {size.y}" : "";
             if (request.done)
             {
                 for (int y = 0; y < size.y; y++) cursor.colors[y] = cursor.buffer[cursorColumn + y * size.x];
-                request = AsyncGPUReadback.RequestIntoNativeArray(ref cursor.buffer, blur.input);
+                request = AsyncGPUReadback.RequestIntoNativeArray(ref cursor.buffer, emit.input);
             }
 
             var sum = cursor.color;
@@ -279,13 +279,15 @@ Resolution: {size.x} x {size.y}" : "";
                 sum += pixel;
                 Color.RGBToHSV(pixel, out var hue, out var saturation, out var value);
 
-                var instrument = Music.Instruments.MinBy(instrument => Vector3.Distance((Vector4)instrument.Color, (Vector4)pixel));
+                var instrument = Music.Instruments.MinBy(instrument => Vector3.Distance(
+                    ((Vector3)(Vector4)instrument.Color).normalized,
+                    ((Vector3)(Vector4)pixel).normalized));
                 var ratio = (float)y / size.y * (saturation * Music.Saturate + 1f - Music.Saturate);
                 var note = Snap((int)Mathf.Lerp(Music.Octaves.x * 12, Music.Octaves.y * 12, ratio), _pentatonic);
 
                 if (clear)
                     cursor.sounds[y].pitch = 0f;
-                else if (exploding && Music.Instruments.TryRandom(out instrument) && instrument.Clips.TryRandom(out var clip))
+                else if (exploding && Music.Instruments.TryFirst(out instrument) && instrument.Clips.TryRandom(out var clip))
                     cursor.sounds[y] = (clip, random.NextFloat(), random.NextFloat(0.5f, 2f) * instrument.Volume, random.NextFloat(-1f, 1f));
                 else if (value > 0f && instrument.Clips.TryAt(Math.Clamp(note / 12, instrument.Octaves.x, instrument.Octaves.y), out clip))
                     cursor.sounds[y] = (clip, Mathf.Clamp01(Mathf.Pow(value, 0.75f) * instrument.Volume * Music.Attenuate), Mathf.Pow(2, note % 12 / 12f), pan);
@@ -376,7 +378,7 @@ Resolution: {size.x} x {size.y}" : "";
                     Camera.Flash.enabled = false;
                     Camera.Output.material.mainTexture = emit.input;
                     Camera.Camera.Render();
-                    ScreenCapture.CaptureScreenshot(png, 4);
+                    ScreenCapture.CaptureScreenshot(png, 3);
                     TryWrite(snapshot, snapshots.buffer);
                     while (!File.Exists(png)) yield return null;
 
