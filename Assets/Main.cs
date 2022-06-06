@@ -3,7 +3,10 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.IO.Ports;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using TMPro;
 using Unity.Collections;
 using UnityEngine;
@@ -119,6 +122,13 @@ public sealed class Main : MonoBehaviour
             return buffer;
         }
 
+        var ports = SerialPort.GetPortNames();
+        Debug.Log($"Ports: {string.Join(", ", ports)}");
+        var serial = (port: new SerialPort(ports[0], 9600), buffer: new byte[5], last: new bool[4]);
+        Application.quitting += () => { try { serial.port.Close(); } catch (Exception exception) { Debug.LogException(exception); } };
+        serial.port.Open();
+        while (serial.port.ReadByte() < byte.MaxValue) yield return null;
+
         Debug.Log($"Devices: {string.Join(", ", WebCamTexture.devices.Select(device => device.name))}");
         var device = new WebCamTexture(WebCamTexture.devices[Camera.Device].name, Camera.X, Camera.Y, Camera.Rate)
         {
@@ -172,6 +182,15 @@ public sealed class Main : MonoBehaviour
         {
             yield return null;
             UnityEngine.Cursor.visible = Application.isEditor;
+
+            while (serial.port.BytesToRead >= serial.buffer.Length)
+            {
+                serial.port.Read(serial.buffer, 0, serial.buffer.Length);
+                if (serial.last[0].Change(serial.buffer[0] > 0)) _buttons.Item1 |= serial.last[0];
+                if (serial.last[1].Change(serial.buffer[1] > 0)) _buttons.Item2 |= serial.last[1];
+                if (serial.last[2].Change(serial.buffer[2] > 0)) _buttons.Item3 |= serial.last[2];
+                if (serial.last[3].Change(serial.buffer[3] > 0)) _buttons.Item4 |= serial.last[3];
+            }
 
             var delta = Time.time - time;
             while (delta > 0 && deltas.Count >= 100) deltas.Dequeue();
