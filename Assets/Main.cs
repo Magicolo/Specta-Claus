@@ -385,8 +385,8 @@ Resolution: {size.x} x {size.y}" : "";
                 var bright = snapshots.magnitudes.Skip(snapshots.magnitudes.Length * 3 / 4).Average();
                 var dark = snapshots.magnitudes.Take(snapshots.magnitudes.Length / 2).Average();
                 var score =
-                    Math.Min(bright, 5f) + // Reward if there are bright pixels.
-                    Math.Max(5f - dark, 0f) + // Reward if there are dark pixels.
+                    Math.Min(bright, 5f) * 2f + // Reward if there are bright pixels.
+                    Math.Max(5f - dark, 0f) * 2f + // Reward if there are dark pixels.
                     Math.Max(10f - Math.Abs(average - 1f), 0) + // Reward if global average is close to 1.
                     Math.Clamp(average - 1f, -1f, 0f) * 10f + // Penalize if global average is lower than 1.
                     Math.Clamp(9f - average, -1f, 0f) * 10f; // Penalize if global average is higher than 9.
