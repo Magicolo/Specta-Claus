@@ -739,6 +739,7 @@ MonoBehaviour:
     Fade: 1
     Attenuate: 0.5
     Loud: 100
+    Hold: 0.1
     Octaves: {x: 3, y: 7}
     Particle: {fileID: 209803}
     Clear: {fileID: 230209911}

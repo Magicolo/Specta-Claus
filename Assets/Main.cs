@@ -53,6 +53,8 @@ public sealed class Main : MonoBehaviour
         public float Attenuate = 0.25f;
         [Range(0f, 250f)]
         public float Loud = 25f;
+        [Range(0f, 1f)]
+        public float Hold = 0.25f;
         public Vector2Int Octaves = new(4, 8);
         public AudioSource Particle;
         public AudioSource Clear;
@@ -81,6 +83,11 @@ public sealed class Main : MonoBehaviour
     }
 
     static readonly int[] _pentatonic = { 0, 3, 5, 7, 10 };
+    static readonly int[] _ionian = { 0, 2, 4, 5, 7, 9, 11 };
+    static readonly int[] _melodic = { 0, 2, 3, 5, 7, 9, 11 };
+    static readonly int[] _harmonic = { 0, 2, 3, 5, 7, 8, 11 };
+    static readonly int[] _chromatic = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
+    static readonly int[] _diminish = { 0, 2, 3, 5, 6, 8, 9, 11 };
     static readonly Modes[] _modes = (Modes[])typeof(Modes).GetEnumValues();
 
     static int Snap(int note, int[] notes)
@@ -124,10 +131,9 @@ public sealed class Main : MonoBehaviour
 
         var ports = SerialPort.GetPortNames();
         Debug.Log($"Ports: {string.Join(", ", ports)}");
-        var serial = (port: ports.TryFirst(out var port) ? new SerialPort(port, 9600) : default, buffer: new byte[5], last: new bool[4]);
+        var serial = (port: ports.TryFirst(out var name) ? new SerialPort(name, 9600) : default, buffer: new byte[5], last: new bool[4]);
         Application.quitting += () => { try { serial.port?.Close(); } catch (Exception exception) { Debug.LogException(exception); } };
         serial.port?.Open();
-        while (serial.port?.ReadByte() < byte.MaxValue) yield return null;
 
         Debug.Log($"Devices: {string.Join(", ", WebCamTexture.devices.Select(device => device.name))}");
         var device = new WebCamTexture(WebCamTexture.devices[Camera.Device].name, Camera.X, Camera.Y, Camera.Rate)
@@ -140,6 +146,7 @@ public sealed class Main : MonoBehaviour
         Debug.Log($"Camera: {device.deviceName} | Resolution: {device.width}x{device.height} | FPS: {device.requestedFPS} | Graphics: {device.graphicsFormat}");
 
         var mode = Modes.None;
+        var scale = 0;
         var random = new System.Random();
         var deltas = new Queue<float>();
         var sources = new Stack<AudioSource>();
@@ -183,13 +190,24 @@ public sealed class Main : MonoBehaviour
             yield return null;
             UnityEngine.Cursor.visible = Application.isEditor;
 
-            while (serial.port?.BytesToRead >= serial.buffer.Length)
+            while (serial.port is SerialPort port && port.BytesToRead >= serial.buffer.Length)
             {
-                serial.port?.Read(serial.buffer, 0, serial.buffer.Length);
-                if (serial.last[0].Change(serial.buffer[0] > 0)) _buttons.Item1 |= serial.last[0];
-                if (serial.last[1].Change(serial.buffer[1] > 0)) _buttons.Item2 |= serial.last[1];
-                if (serial.last[2].Change(serial.buffer[2] > 0)) _buttons.Item3 |= serial.last[2];
-                if (serial.last[3].Change(serial.buffer[3] > 0)) _buttons.Item4 |= serial.last[3];
+                port.Read(serial.buffer, 0, serial.buffer.Length);
+                if (serial.buffer[4] < byte.MaxValue)
+                {
+                    while (port.ReadByte() < byte.MaxValue)
+                    {
+                        Debug.Log("Adjusting serial buffer.");
+                        yield return null;
+                    }
+                }
+                else
+                {
+                    if (serial.last[0].Change(serial.buffer[0] > 0)) _buttons.Item1 |= serial.last[0];
+                    if (serial.last[1].Change(serial.buffer[1] > 0)) _buttons.Item2 |= serial.last[1];
+                    if (serial.last[2].Change(serial.buffer[2] > 0)) _buttons.Item3 |= serial.last[2];
+                    if (serial.last[3].Change(serial.buffer[3] > 0)) _buttons.Item4 |= serial.last[3];
+                }
             }
 
             var delta = Time.time - time;
@@ -220,6 +238,7 @@ Resolution: {size.x} x {size.y}" : "";
             {
                 Music.Clear.Play();
                 Music.Clear.volume = 1f;
+                scale++;
             }
             if (save)
             {
@@ -304,7 +323,13 @@ Resolution: {size.x} x {size.y}" : "";
                     ((Vector3)(Vector4)instrument.Color).normalized,
                     ((Vector3)(Vector4)pixel).normalized));
                 var ratio = (float)y / size.y * (saturation * Music.Saturate + 1f - Music.Saturate);
-                var note = Snap((int)Mathf.Lerp(Music.Octaves.x * 12, Music.Octaves.y * 12, ratio), _pentatonic);
+                var note = Snap((int)Mathf.Lerp(Music.Octaves.x * 12, Music.Octaves.y * 12, ratio), scale.Wrap(4) switch
+                {
+                    1 => _melodic,
+                    2 => _pentatonic,
+                    3 => _harmonic,
+                    _ => _ionian,
+                });
 
                 if (clear)
                     cursor.sounds[y].pitch = 0f;
@@ -330,6 +355,7 @@ Resolution: {size.x} x {size.y}" : "";
             }
             else
             {
+                // TODO: Verify it works!
                 Array.Sort(voices, (left, right) => right.volume.CompareTo(left.volume));
                 for (int i = 0; i < voices.Length && i < Music.Voices; i++)
                     if (voices[i] is AudioSource source && !source.isPlaying) source.Play();
@@ -345,7 +371,8 @@ Resolution: {size.x} x {size.y}" : "";
             while (source)
             {
                 var (clip, volume, pitch, pan) = cursor.sounds[y];
-                if (clip == null || last.clip == clip)
+                var hold = source.isPlaying && source.time < Music.Hold;
+                if (clip == null || last.clip == clip || hold)
                 {
                     source.volume = Mathf.Lerp(source.volume, volume, Time.deltaTime * Music.Fade);
                     source.pitch = Mathf.Lerp(source.pitch, pitch, Time.deltaTime * 5f);
@@ -361,6 +388,7 @@ Resolution: {size.x} x {size.y}" : "";
                     source.pitch = pitch;
                     source.panStereo = pan;
                     source.time = 0f;
+                    // source.Play();
                     last = (clip, time);
                 }
                 yield return null;
