@@ -830,7 +830,7 @@ MonoBehaviour:
       - {fileID: 8300000, guid: 52051b3c8a826f1418f983ea7532ef1e, type: 3}
   Cursor:
     Color: {r: 23.968628, g: 10.039216, b: 0, a: 1}
-    Adapt: 1
+    Adapt: 0.8
   Text: {fileID: 1725860455}
 --- !u!4 &1401311511
 Transform:

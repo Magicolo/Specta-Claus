@@ -233,15 +233,18 @@ Resolution: {size.x} x {size.y}" : "";
             else if (next < time) { exploding = true; next = float.MaxValue; }
             else exploding = false;
 
-            if (clear || explode || save || load) Camera.Flash.material.SetFloat("_Flash", 10f);
+            if (clear || explode || save || load) Camera.Flash.material.SetFloat("_Flash", 25f);
             if (clear)
             {
+                Camera.Flash.material.SetColor("_Color", new(1f, 1f, 1f, 1f));
                 Music.Clear.Play();
                 Music.Clear.volume = 1f;
                 scale++;
             }
+            if (explode) Camera.Flash.material.SetColor("_Color", new(1f, 1f, 0.5f, 1f));
             if (save)
             {
+                Camera.Flash.material.SetColor("_Color", new(0.5f, 1f, 0.5f, 1f));
                 Music.Save.Play();
                 Music.Save.volume = 1f;
                 Music.Save.pitch = 0.5f;
@@ -251,6 +254,7 @@ Resolution: {size.x} x {size.y}" : "";
             }
             if (load)
             {
+                Camera.Flash.material.SetColor("_Color", new(1f, 0.5f, 0.5f, 1f));
                 Music.Load.Play();
                 Music.Load.volume = 1f;
                 Load();
