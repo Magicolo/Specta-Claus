@@ -5,8 +5,6 @@ using System.IO;
 using System.IO.Compression;
 using System.IO.Ports;
 using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using TMPro;
 using Unity.Collections;
 using UnityEngine;
@@ -82,13 +80,24 @@ public sealed class Main : MonoBehaviour
         Emit = 5,
     }
 
+    enum Scales
+    {
+        Pentatonic,
+        Ionian,
+        Melodic,
+        Harmonic,
+        // Chromatic,
+        // Diminish,
+    }
+
     static readonly int[] _pentatonic = { 0, 3, 5, 7, 10 };
     static readonly int[] _ionian = { 0, 2, 4, 5, 7, 9, 11 };
     static readonly int[] _melodic = { 0, 2, 3, 5, 7, 9, 11 };
     static readonly int[] _harmonic = { 0, 2, 3, 5, 7, 8, 11 };
-    static readonly int[] _chromatic = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
-    static readonly int[] _diminish = { 0, 2, 3, 5, 6, 8, 9, 11 };
+    // static readonly int[] _chromatic = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
+    // static readonly int[] _diminish = { 0, 2, 3, 5, 6, 8, 9, 11 };
     static readonly Modes[] _modes = (Modes[])typeof(Modes).GetEnumValues();
+    static readonly Scales[] _scales = (Scales[])typeof(Scales).GetEnumValues();
 
     static int Snap(int note, int[] notes)
     {
@@ -146,7 +155,7 @@ public sealed class Main : MonoBehaviour
         Debug.Log($"Camera: {device.deviceName} | Resolution: {device.width}x{device.height} | FPS: {device.requestedFPS} | Graphics: {device.graphicsFormat}");
 
         var mode = Modes.None;
-        var scale = 0;
+        var scale = Scales.Ionian;
         var random = new System.Random();
         var deltas = new Queue<float>();
         var sources = new Stack<AudioSource>();
@@ -239,7 +248,7 @@ Resolution: {size.x} x {size.y}" : "";
                 Camera.Flash.material.SetColor("_Color", new(1f, 1f, 1f, 1f));
                 Music.Clear.Play();
                 Music.Clear.volume = 1f;
-                scale++;
+                scale = _scales[((int)scale + 1) % _scales.Length];
             }
             if (explode) Camera.Flash.material.SetColor("_Color", new(1f, 1f, 0.5f, 1f));
             if (save)
@@ -327,12 +336,15 @@ Resolution: {size.x} x {size.y}" : "";
                     ((Vector3)(Vector4)instrument.Color).normalized,
                     ((Vector3)(Vector4)pixel).normalized));
                 var ratio = (float)y / size.y * (saturation * Music.Saturate + 1f - Music.Saturate);
-                var note = Snap((int)Mathf.Lerp(Music.Octaves.x * 12, Music.Octaves.y * 12, ratio), scale.Wrap(4) switch
+                var note = Snap((int)Mathf.Lerp(Music.Octaves.x * 12, Music.Octaves.y * 12, ratio), scale switch
                 {
-                    1 => _melodic,
-                    2 => _pentatonic,
-                    3 => _harmonic,
-                    _ => _ionian,
+                    Scales.Pentatonic => _pentatonic,
+                    Scales.Ionian => _ionian,
+                    Scales.Harmonic => _harmonic,
+                    Scales.Melodic => _melodic,
+                    // Scales.Chromatic => _chromatic,
+                    // Scales.Diminish => _diminish,
+                    _ => default,
                 });
 
                 if (clear)

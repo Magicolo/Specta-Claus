@@ -215,7 +215,7 @@ void Update(uint3 id : SV_DispatchThreadID)
     const float BlurInside = 0.25;
     const float BlurOutline = 2.5;
     const float BlurSobel = 5;
-    const float BlurJitter = 5;
+    const float BlurJitter = 10;
 
     const int EdgeSize = 1;
     const float EdgeThreshold = 0.1;
