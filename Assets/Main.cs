@@ -110,6 +110,8 @@ public sealed class Main : MonoBehaviour
     public float Delta = 0.01f;
     public float Explode = 1f;
     public int Snapshots = 3;
+    [Range(0f, 5f)]
+    public float Clear = 0.5f;
     public ComputeShader Shader;
     public CameraSettings Camera = new();
     public MusicSettings Music = new();
@@ -192,6 +194,7 @@ public sealed class Main : MonoBehaviour
         var exploding = false;
         var next = float.MaxValue;
         var attenuate = 1f;
+        var clear = 0f;
         for (int y = 0; y < size.y; y++) StartCoroutine(Sound(y));
 
         while (true)
@@ -229,7 +232,7 @@ Mode: {mode}
 Resolution: {size.x} x {size.y}" : "";
 
             attenuate = Mathf.Clamp01(2f - voices.Sum(voice => voice.isPlaying ? voice.volume : 0f) / Music.Loud);
-            var clear = _buttons.Item1.Take();
+            clear = _buttons.Item1.Take() ? Clear : clear - delta;
             var explode = _buttons.Item2.Take();
             var save = _buttons.Item3.Take();
             var load = _buttons.Item4.Take();
@@ -242,8 +245,8 @@ Resolution: {size.x} x {size.y}" : "";
             else if (next < time) { exploding = true; next = float.MaxValue; }
             else exploding = false;
 
-            if (clear || explode || save || load) Camera.Flash.material.SetFloat("_Flash", 25f);
-            if (clear)
+            if (clear >= Clear || explode || save || load) Camera.Flash.material.SetFloat("_Flash", 25f);
+            if (clear >= Clear)
             {
                 Camera.Flash.material.SetColor("_Color", new(1f, 1f, 1f, 1f));
                 Music.Clear.Play();
@@ -266,6 +269,7 @@ Resolution: {size.x} x {size.y}" : "";
                 Camera.Flash.material.SetColor("_Color", new(1f, 0.5f, 0.5f, 1f));
                 Music.Load.Play();
                 Music.Load.volume = 1f;
+                scale = _scales[((int)scale + 1) % _scales.Length];
                 Load();
             }
 
@@ -281,15 +285,14 @@ Resolution: {size.x} x {size.y}" : "";
             Shader.SetTexture(0, "CameraOutput", camera.output);
             Shader.SetInt("CursorColumn", cursorColumn);
             Shader.SetVector("CursorColor", cursor.color);
-            Shader.SetFloat("Time", time);
             Shader.SetFloat("Delta", Delta);
-            Shader.SetBool("Clear", clear);
+            Shader.SetBool("Clear", clear > 0);
             Shader.SetFloat("Explode", exploding ? Explode : 0f);
 
-            var steps = Math.Clamp((int)(Time.time - time) / Delta, 1, 10);
-            for (int step = 0; step < steps; step++, time += Delta)
+            var steps = (int)(delta / Delta);
+            for (int step = 0; step < Math.Clamp(steps, 1, 10); step++)
             {
-                Shader.SetFloat("Time", time);
+                Shader.SetFloat("Time", time + step * Delta);
                 Shader.SetVector("Seed", new Vector4(Random.value, Random.value, Random.value, Random.value));
                 Shader.SetTexture(0, "VelocityInput", velocity.input);
                 Shader.SetTexture(0, "VelocityOutput", velocity.output);
@@ -305,7 +308,7 @@ Resolution: {size.x} x {size.y}" : "";
                 (blur.input, blur.output) = (blur.output, blur.input);
                 (emit.input, emit.output) = (emit.output, emit.input);
             }
-            while (time < Time.time) time += Delta;
+            time += steps * Delta;
 
             Camera.Output.material.mainTexture = _buttons.space.Take() ? output : mode switch
             {
@@ -347,7 +350,7 @@ Resolution: {size.x} x {size.y}" : "";
                     _ => default,
                 });
 
-                if (clear)
+                if (clear > 0)
                     cursor.sounds[y].pitch = 0f;
                 else if (exploding && Music.Instruments.TryFirst(out instrument) && instrument.Clips.TryRandom(out var clip))
                     cursor.sounds[y] = (clip, random.NextFloat(), random.NextFloat(0.5f, 2f) * instrument.Volume, random.NextFloat(-1f, 1f));

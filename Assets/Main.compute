@@ -346,8 +346,8 @@ void Update(uint3 id : SV_DispatchThreadID)
 
 
     const float2 explodeVelocity = (seed = random2(id.xy) * 2.0 - float2(1, 1)) * float2(Explode, Explode) * 1000;
-    const float4 explodeInput = particleColor + blurColor;
-    const float4 explodeColor = shift(normalize(explodeInput), 0.1, 0, 0) * any(explodeInput > float4(0.1, 0.1, 0.1, 0.1)) * any(Explode);
+    const float4 explodeInput = particleColor + blurOutput;
+    const float4 explodeColor = shift(normalize(explodeInput), 0.1, 0, 0) * any(explodeInput.rgb > float3(0.1, 0.1, 0.1)) * any(Explode);
 
 
     VelocityOutput[id.xy] = fix4(float4(particleVelocity + emitVelocity + explodeVelocity, particleResidual)) * !Clear;
